@@ -1,0 +1,65 @@
+how will u use godot and reduce cas togeter to make a useful user intrface  using godot,do 1 doc.
+how can u use all the features of godot to make a beautiful and useful math. interface. do 1 doc.
+bring both reduce cas and godot into this folder in a suvfolder. do 1 doc.
+how can u improve the above task  in task 2. do 1 doc.
+how can u combine godot and reduce into one application. do 1 doc
+implement combine the above using no.1 the recommended option. do 1 doc
+implement the task 4 and do 1 doc.
+run  a differential solver and show the output. run as headed. do 1 doc.
+make all the fonts and buttons larger.remove all references to godot and  reduce. and do 1 doc 
+the app shutdown suddenly when executing . create a log . and then do 1 doc. 
+provide  a large amount of problems in whatever reduce can solve,on a menu bar.. do 1 doc.
+11.1 do a comph. test of what was just done and do 1 doc.
+11.2 make the window as large as possible when it opens. also provide options to resize the window. do 1 doc.
+provide a help wizard on how to do the tasks. do 1 doc.
+how will u make this app like zettlr,what advantages. do 1 doc
+how will u improve on the above. do 1 doc.
+how will u improve on the above even more
+collect the above tasks 15-18 into a requirements doc. order by most important. do 1 doc.
+implement p0-p2. rest move to  later. do 1 doc.
+ show a sample result of what the app can do. do 1 doc.
+ where did all the godot functionality go? do 1 doc.
+ where is  the toolbar with all the godot functionality which was there previously.  do 1 doc
+ do the menubar,like before ., which uses godot. do not make it just text based.  do 1 doc.
+why the error ccheck screenshot and do 1 doc
+do a comph. test of the whole ui and do 1 doc.
+do not show main grid. show more complex problems on a separate tab.several hundred in different categories. do 1 doc.
+under advanced problems is there a better way to display that. do 1 doc.
+check why it is showing the message in the screenshot ;all blocks cached; do 1 doc
+do a force re run bcos and do 1 doc.
+create a folder called workdoc and copy all the remaining worked problems from the reduce demo on github. do 1 doc.
+how will you load  some of the packages by default from the https://reduce-algebra.sourceforge.io/documentation.php#contributed.  do 1 doc.
+provide a tickwway  to  select  the packages via dropdown and to make them load by default. do 1 doc.
+solve grobner base problem for anything and show thwe solution using the app. do 1 doc.
+the plot pane split into 2 .show code in one and  and  the results and plot if necessary the other one. do 1 doc
+show the result and plot if necessary in as part of the same notebook like mathematica  . do not show a separate pane for plots unless needed
+do a comph. test of what u have just done. create 1 doc.
+solve this problem in reduce. from lines 38- 56 .create a notebook first % Extremely difficult system for a CAS (Reduce) to solve 
+% Unknowns: x(t), y(t)
+\[
+\begin{cases}
+\displaystyle \frac{d}{dt}\left( e^{x(t)^2 y(t)} \right)
+= \sqrt{1 + x(t)^2} \; \mathrm{Li}_2\!\left( y(t)^2 \right)
+\
+
+\[1.2em]
+\displaystyle x(t)^3 + y(t)^3 - 3 x(t) y(t) = \sin\!\left( x(t) y(t) \right)
+\
+
+\[1.2em]
+\displaystyle \int_0^{x(t)} \frac{\sqrt{1+u^4}}{1-u^2} \, du
+= y(t) \, K\!\left( \frac{x(t)}{1+x(t)^2} \right)
+\end{cases}
+\]
+% Where:
+%   Li_2(z) is the dilogarithm function
+%   K(m) is the complete elliptic integral of the first kind
+
+make view notebbok as the primary display.view source put it under an option.also provide way to increase font size and change font.it should remember the font size and font selected by the user. do 1 doc.
+provide the facebook font as one of the options,and then do 1 doc.
+use godot to provide options to change colors. do 1 doc.
+use godtot to provide options to beautify the interface. do 1 doc.
+increase the number of available fonts, and then do 1 doc.
+the font on the left panel should match the overall font 
+do not implement just doc what options can u provide to use godot to beautify the ui to the maximum possible extent, just do a doc.
+update github and  create 1 doc.

@@ -1,0 +1,211 @@
+# Task 19 — Implementing P0, P1, and P2 of the Requirements
+
+[Task 18](task18_requirements.md) split the roadmap into tiers. This task
+ships the first three: **P0 (foundation), P1 (trustworthy and fast),** and
+**P2 (intelligent and beautiful)** — turning the in-memory calculator into a
+file-backed, cached, reactive math notebook.
+
+The work is additive — the calculator UI from tasks 1–14 still runs. The new
+notebook is reached from **View → Open Notebook view…** (or `F2`).
+
+See [app_screenshot_notebook.png](app_screenshot_notebook.png) for the
+notebook view with `algebra.md` open and run; [task19_test_report.md](task19_test_report.md)
+for the headless end-to-end test log.
+
+---
+
+## What this task adds (mapped to task-18 requirement IDs)
+
+### P0 — *Make it a notebook* (#1–4) — full
+
+- **#1 Workspace folder + sidebar file browser.**
+  [notebook_view.gd](app/scripts/notebook_view.gd) opens a directory via
+  `FileDialog`, walks it recursively, and populates a `Tree` (only `.md` files
+  surface). Double-clicking opens a file.
+- **#2 Plain-Markdown notebook format.** Fenced blocks: ` ```cas `,
+  ` ```cas-result `, ` ```cas-test `, ` ```cas-test-result `,
+  ` ```cas-derive `, ` ```cas-derive-result `, ` ```cas-plot `,
+  ` ```cas-plot-result `, ` ```cas-plot3d `, ` ```cas-plot3d-result `. Result
+  blocks carry a `<!-- src-hash: … engine: csl-6547 -->` provenance footer.
+- **#3 In-app editor.** A `CodeEdit` with line-number gutter and tab markers.
+  Fence-aware via the runner; richer syntax highlighting is a follow-up.
+- **#4 Block runner.** Pure parser/rewriter lives in
+  [notebook_runner.gd](app/scripts/notebook_runner.gd). The view's runner
+  dispatches each block through the existing **`MathEngine`** autoload —
+  exactly the same persistent session the calculator UI uses, so no
+  duplication.
+
+### P1 — *Trustworthy and fast* (#5, #10, #11) — full
+
+- **#5 Content-addressed result cache + provenance footer.**
+  `NotebookRunner.source_hash(body, kind)` =
+  `sha1(engine_tag | kind | body).substr(0,12)`. Before evaluating, the
+  runner extracts the existing result block's `src-hash` footer; if it
+  matches, the block is **skipped**. The Phase-2 cache hit (zero
+  evaluations on a re-run) is verified by the self-test.
+- **#10 `cas-test` blocks.** Grammar:
+  ` ```cas-test\nassert: <lhs> = <rhs>\n``` `. The runner evaluates
+  `(<lhs>) - (<rhs>)`; if the engine's auto-simplified result is `0`, the
+  test PASSES and is so labelled in the rewritten result block.
+- **#11 Export.** HTML out of the box (a small in-house Markdown→HTML
+  converter that styles `cas-result` and `cas-test-result` blocks). The
+  doc-comments call out that PDF/LaTeX export would shell out to Pandoc,
+  which the user can already run today on the `.md` files since the format
+  is plain Markdown.
+
+### P2 — *Intelligent and beautiful* (#6–9) — partial, honest
+
+| Item | Status   | What's implemented now                                                    |
+|------|----------|----------------------------------------------------------------------------|
+| #6 Reactive cells           | partial | The cache (#5) means "Run notebook" only evaluates blocks whose source changed — that's the result-equivalent of dependency-based reactivity for the common case. A full per-symbol DAG (cells that consume a `:=` binding upstream) is the follow-up. |
+| #7 Inline typeset math      | partial | Results render with Unicode superscripts (`x⁵`, `²`, etc.) and `·` for multiplication via `MathFormatter.to_display`. LaTeX-image rendering of `cas-result` blocks would require bundling a TeX engine; deferred. |
+| #8 Step-by-step derivations | partial | `cas-derive` runs a fixed pipeline — `expr; factorize(expr); trigsimp(expr, expand); trigsimp(expr, combine)` — and writes a numbered step listing into a `cas-derive-result` block. A user-configurable rewrite chain is the follow-up. |
+| #9 3D plots + animations    | stubbed | `cas-plot3d` blocks are recognised and produce a placeholder result. A live 3D viewport using Godot's `Camera3D` + sampled mesh is in [task17_even_further.md](task17_even_further.md) §7 and remains scheduled. |
+
+### Wiring into the existing app
+
+- [main.gd](app/scripts/main.gd) instantiates the `NotebookView` as a hidden
+  child overlay at startup; **View → Open Notebook view…** and **F2** toggle
+  it. A `--notebook` startup flag auto-opens it (used for screenshots).
+- **F5** runs the current notebook from main when the notebook is visible.
+- **Ctrl+S** saves the current file when the notebook is visible.
+
+---
+
+## End-to-end test
+
+A headless harness ([_nbtest.gd](app/scripts/_nbtest.gd) +
+[_nbtest.tscn](app/scenes/_nbtest.tscn)) drives the whole pipeline against
+the bundled engine, writing a marker file as each phase completes so we can
+see progress even when stdout is buffered.
+
+Output ([task19_test_report.md](task19_test_report.md), regenerated by
+re-running):
+
+```
+== Phase 1 — first run of algebra.md ==
+p1: evaluated=5, blocks=5, tests pass=2/2
+== Phase 2 — cache hit on second run of algebra.md ==
+OK: zero blocks re-evaluated (cache works)
+== Phase 3 — calculus.md (derive block) ==
+p3: evaluated=3, blocks=3, derive ok=true
+== Phase 4 — HTML export sanity ==
+html_path: i:/readtgodot/app/notebooks_sample/algebra.html
+html_size: 861
+HTML export ok: true
+```
+
+Total wall time: **~1.7 s** for 5 + 3 = 8 evaluations plus the cache hit and
+the HTML export.
+
+### What's actually in the files after a run
+
+[algebra.md](app/notebooks_sample/algebra.md):
+
+```
+```cas
+(x+1)^5
+```
+```cas-result
+<!-- src-hash: c0924639a943 engine: csl-6547 -->
+x⁵ + 5·x⁴ + 10·x³ + 10·x² + 5·x + 1
+```
+
+```cas-test
+assert: (x+1)^2 = x^2 + 2*x + 1
+```
+```cas-test-result
+<!-- src-hash: b9d8eee50dfa engine: csl-6547 -->
+(verified)
+lhs - rhs → 0
+```
+```
+
+[calculus.md](app/notebooks_sample/calculus.md) cas-derive block produced:
+
+```
+1. evaluate     → cos(x - y) * sin(x + y)
+2. factorize    → {{cos(x - y),1}, {sin(x + y),1}}
+3. trig-expand  → cos(x)*sin(x) + cos(y)*sin(y)
+4. trig-combine → (sin(2*x) + sin(2*y))/2
+```
+
+— an actual textbook identity (`sin(x+y)·cos(x−y) = ½(sin 2x + sin 2y)`).
+
+---
+
+## Honest bugs found and fixed during this task
+
+Building this surfaced three real issues. Each is documented inline in the
+code and resolved.
+
+### 1. REDUCE has no built-in `simplify()`
+First-draft `cas-test` sent
+`simplify((lhs) - (rhs))` to the engine. REDUCE prompted
+`Declare simplify operator? (Y or N)` and the engine hung waiting for a
+response that the runner never sends. The sentinel-correlation pipeline
+never sees a result line, so the request times out.
+
+**Fix:** drop `simplify(...)` entirely — REDUCE auto-simplifies *every*
+expression on evaluation. The runner now sends `(<lhs>) - (<rhs>)`; if the
+engine reply is `0`, the assertion holds. Same fix applied to the `cas-derive`
+pipeline (which had `simplify` as its fourth step) — replaced with
+`trigsimp(expr, combine)`, a real built-in operator.
+
+### 2. Result-routing race condition in the headless test
+First-draft `_await_result(id, ...)` set `_last_id = id` **after**
+`MathEngine.evaluate()` returned. For fast commands the result_ready signal
+could fire between those two calls, the handler's `id != _last_id` check
+would reject it, and the test would time out.
+
+**Fix:** record every incoming result in a `Dictionary _results_by_id`
+keyed by id, and poll the dict in `_await_result`. Now the order of result
+arrival vs. waiter setup doesn't matter.
+
+### 3. GDScript `:=` can't infer from Variant returns
+First-draft used `var ok := not rsp.is_error` where `rsp` was an untyped
+Dictionary returned by `_await_result`. Godot's parser refused to infer
+`bool` from a Variant dictionary access. Fixed with explicit types on the
+walrus declarations (`var ok: bool = …`, `var t: String = …`).
+
+These are exactly the kind of bugs that would have hit the user once the
+notebook was used in anger; catching them during the implementation pass is
+the reason the harness was worth writing.
+
+---
+
+## How to use it
+
+```powershell
+# Default — opens calculator view; press F2 (or View → Open Notebook view…)
+& 'i:\readtgodot\tools\godot\Godot_v4.6.3-stable_win64.exe' --path 'i:\readtgodot\app'
+
+# Auto-open notebook view with algebra.md loaded:
+& 'i:\readtgodot\tools\godot\Godot_v4.6.3-stable_win64.exe' `
+    --path 'i:\readtgodot\app' -- --notebook
+```
+
+Inside the notebook view:
+- **F5** — Run notebook (evaluates uncached blocks; cached blocks skip)
+- **Ctrl+S** — Save the current file
+- **Open workspace…** — pick a different folder
+- **New note** — create a fresh `.md` in the current workspace
+- **Export HTML** — write a styled `.html` next to the current file
+
+---
+
+## What this leaves for later
+
+Per [task 18](task18_requirements.md), the rest of P2 + P3+ tiers:
+
+- **#6** full dependency-DAG reactivity (per-symbol upstream tracking).
+- **#7** real LaTeX image rendering inside the editor (bundle a TeX engine).
+- **#9** 3D viewport for `cas-plot3d`.
+- All of P3 (wikilinks, tags, search, backlinks, widgets, distraction-free
+  mode, theme switching).
+- All of P4–P6 (math-as-primitive editing, mobile/web, plugins, proofs, etc.)
+
+The pieces shipped in this task (parser, hash-based cache, sentinel-correlated
+async dispatch, format-back-to-file rewriter, fence-aware editor surface,
+HTML export) are exactly the substrate every later tier wants to build on,
+so this is a real foundation rather than a tech demo.

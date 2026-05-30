@@ -1,0 +1,33 @@
+# Bundled binaries — too large for GitHub (the Godot .exe alone is 164 MB,
+# the full REDUCE install is 253 MB). The README documents how to fetch
+# them; the app's run-time paths resolve to these folders locally.
+tools/
+
+# Godot's per-machine import cache — regenerated on first launch.
+app/.godot/
+
+# Notebook HTML exports + per-launch screenshots — derived artefacts,
+# the app produces them on demand.
+app/notebooks_sample/*.html
+
+# Per-user persisted settings live in Godot's user:// (out of the repo
+# already), but be defensive about accidental copies left in the repo.
+app/font.cfg
+app/color.cfg
+app/style.cfg
+app/packages.cfg
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE local state
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and temporary marker files used by the headless test harnesses
+*_marker.txt
+nbtest.log
+app_screenshot_capture.png
