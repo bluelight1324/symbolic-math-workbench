@@ -81,6 +81,28 @@ var _shadows_check: CheckBox
 var _anim_check: CheckBox
 var _root_bg: ColorRect    # the notebook view's background — re-coloured on scheme change
 
+# Task 66 — single MenuButton replacing every action-bar widget.
+var _menu_btn: MenuButton
+var _popup: PopupMenu
+var _font_submenu: PopupMenu
+var _size_submenu: PopupMenu
+var _theme_submenu: PopupMenu
+var _style_submenu: PopupMenu
+const _SIZE_OPTIONS := [10, 12, 14, 16, 18, 20, 22, 24, 28, 32]
+const _ID_OPEN := 0
+const _ID_NEW := 1
+const _ID_SAVE := 2
+const _ID_RUN := 3
+const _ID_FORCE := 4
+const _ID_EXPORT := 5
+const _ID_VIEW := 6
+const _ID_SHADOWS := 5000
+const _ID_ANIMATIONS := 5001
+const _ID_FONT_BASE := 1000
+const _ID_SIZE_BASE := 2000
+const _ID_THEME_BASE := 3000
+const _ID_STYLE_BASE := 4000
+
 # Older "strip below editor" plot from task 35 v1 — kept as a fallback
 # render target while in source mode.
 var _plot_strip: VBoxContainer
@@ -129,6 +151,9 @@ func _ready() -> void:
 		_anim_check.button_pressed = _animations_on
 	_apply_visual_style()
 
+	# Task 66 — reflect the loaded settings into the new MenuButton popup.
+	_sync_menu_checks()
+
 	# Task 58 — notebook view is the default; reflect in the toggle label.
 	_apply_view_mode()
 
@@ -157,87 +182,17 @@ func _build_ui() -> void:
 	_path_label.text = "(no workspace open)"
 	_path_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	topbar.add_child(_path_label)
-	for spec in [
-		["Open workspace…", _on_open_workspace],
-		["New note", _on_new_note],
-		["Save  (Ctrl+S)", _on_save],
-		["Run notebook  (F5)", _on_run],
-		["Force re-run  (Ctrl+F5)", _on_force_run],
-		["Export HTML", _on_export_html],
-	]:
-		var b := Button.new()
-		b.text = spec[0]
-		b.pressed.connect(spec[1])
-		topbar.add_child(b)
-	# Task 58: notebook view is the primary display; the Source mode is an
-	# opt-in toggle. Button label reflects the action that clicking it does.
-	_view_mode_btn = Button.new()
-	_view_mode_btn.text = "Show Source"
-	_view_mode_btn.tooltip_text = "Toggle between Notebook (rendered) and raw Source view"
-	_view_mode_btn.pressed.connect(_toggle_view_mode)
-	topbar.add_child(_view_mode_btn)
-
-	# Task 58 — font family + size controls (persisted via FontConfig).
-	var vsep := VSeparator.new()
-	topbar.add_child(vsep)
-	var font_label := Label.new()
-	font_label.text = "Font:"
-	font_label.add_theme_color_override("font_color", Color(0.65, 0.7, 0.78))
-	topbar.add_child(font_label)
-	_font_family_btn = OptionButton.new()
-	for f in FontConfig.FAMILIES:
-		_font_family_btn.add_item(f["label"])
-	_font_family_btn.tooltip_text = "Font family — persists across launches"
-	_font_family_btn.item_selected.connect(_on_font_family_changed)
-	topbar.add_child(_font_family_btn)
-	var size_label := Label.new()
-	size_label.text = "Size:"
-	size_label.add_theme_color_override("font_color", Color(0.65, 0.7, 0.78))
-	topbar.add_child(size_label)
-	_font_size_spin = SpinBox.new()
-	_font_size_spin.min_value = 10
-	_font_size_spin.max_value = 32
-	_font_size_spin.step = 1
-	_font_size_spin.custom_minimum_size = Vector2(80, 0)
-	_font_size_spin.tooltip_text = "Font size in points — persists across launches"
-	_font_size_spin.value_changed.connect(_on_font_size_changed)
-	topbar.add_child(_font_size_spin)
-
-	# Task 60 — colour scheme dropdown (persisted via ColorConfig).
-	topbar.add_child(VSeparator.new())
-	var theme_label := Label.new()
-	theme_label.text = "Theme:"
-	theme_label.add_theme_color_override("font_color", Color(0.65, 0.7, 0.78))
-	topbar.add_child(theme_label)
-	_color_btn = OptionButton.new()
-	for k in ColorConfig.ordered_keys():
-		_color_btn.add_item(ColorConfig.scheme(k)["label"])
-	_color_btn.tooltip_text = "Colour scheme — persists across launches"
-	_color_btn.item_selected.connect(_on_color_changed)
-	topbar.add_child(_color_btn)
-
-	# Task 61 — beautification: density preset + shadow / animation toggles.
-	topbar.add_child(VSeparator.new())
-	var style_label := Label.new()
-	style_label.text = "Style:"
-	style_label.add_theme_color_override("font_color", Color(0.65, 0.7, 0.78))
-	topbar.add_child(style_label)
-	_density_btn = OptionButton.new()
-	for k in StyleConfig.ordered_keys():
-		_density_btn.add_item(StyleConfig.density(k)["label"])
-	_density_btn.tooltip_text = "Density preset — cell spacing, padding, corner radius"
-	_density_btn.item_selected.connect(_on_density_changed)
-	topbar.add_child(_density_btn)
-	_shadows_check = CheckBox.new()
-	_shadows_check.text = "Shadows"
-	_shadows_check.tooltip_text = "Subtle drop shadow under each cell"
-	_shadows_check.toggled.connect(_on_shadows_toggled)
-	topbar.add_child(_shadows_check)
-	_anim_check = CheckBox.new()
-	_anim_check.text = "Animations"
-	_anim_check.tooltip_text = "Fade between Source ↔ Notebook view"
-	_anim_check.toggled.connect(_on_animations_toggled)
-	topbar.add_child(_anim_check)
+	# Task 66 — all of the previous action-bar widgets (Open workspace, New
+	# note, Save, Run, Force re-run, Export HTML, Show Source, Font, Size,
+	# Theme, Style, Shadows, Animations) collapsed into one MenuButton with
+	# a popup tree of submenus + checkable items. The action bar is now just
+	# the workspace label on the left and this one button on the right.
+	_menu_btn = MenuButton.new()
+	_menu_btn.text = "☰  Notebook menu  ▾"
+	_menu_btn.tooltip_text = "All notebook actions and preferences"
+	_menu_btn.custom_minimum_size = Vector2(200, 0)
+	topbar.add_child(_menu_btn)
+	_build_menubar_popup()
 
 	# Split: sidebar | editor.
 	var split := HSplitContainer.new()
@@ -700,6 +655,148 @@ func _hide_plot_strip() -> void:
 		_plot_panel.clear_plot()
 
 
+## Task 66 — build the MenuButton's popup tree.
+## Top-level items: file/run actions, then submenus for Font/Size/Theme/Style,
+## then checkable items for Shadows/Animations.
+func _build_menubar_popup() -> void:
+	_popup = _menu_btn.get_popup()
+	_popup.clear()
+	_popup.add_item("Open workspace…", _ID_OPEN)
+	_popup.add_item("New note", _ID_NEW)
+	_popup.add_separator()
+	_popup.add_item("Save        Ctrl+S", _ID_SAVE)
+	_popup.add_item("Run notebook       F5", _ID_RUN)
+	_popup.add_item("Force re-run       Ctrl+F5", _ID_FORCE)
+	_popup.add_item("Export HTML", _ID_EXPORT)
+	_popup.add_separator()
+	# View-mode toggle item — text refreshed by _apply_view_mode().
+	_popup.add_item("Show Source", _ID_VIEW)
+	_popup.add_separator()
+
+	# Font submenu (23 families).
+	_font_submenu = PopupMenu.new()
+	_font_submenu.name = "FontMenu"
+	for i in range(FontConfig.FAMILIES.size()):
+		_font_submenu.add_radio_check_item(
+			FontConfig.FAMILIES[i]["label"], _ID_FONT_BASE + i)
+	_font_submenu.id_pressed.connect(_on_menu_id_pressed)
+	_popup.add_child(_font_submenu)
+	_popup.add_submenu_item("Font", "FontMenu")
+
+	# Size submenu (discrete preset sizes).
+	_size_submenu = PopupMenu.new()
+	_size_submenu.name = "SizeMenu"
+	for i in range(_SIZE_OPTIONS.size()):
+		_size_submenu.add_radio_check_item(
+			"%d pt" % int(_SIZE_OPTIONS[i]), _ID_SIZE_BASE + i)
+	_size_submenu.id_pressed.connect(_on_menu_id_pressed)
+	_popup.add_child(_size_submenu)
+	_popup.add_submenu_item("Size", "SizeMenu")
+
+	# Theme submenu (colour schemes).
+	_theme_submenu = PopupMenu.new()
+	_theme_submenu.name = "ThemeMenu"
+	var theme_keys := ColorConfig.ordered_keys()
+	for i in range(theme_keys.size()):
+		_theme_submenu.add_radio_check_item(
+			ColorConfig.scheme(theme_keys[i])["label"], _ID_THEME_BASE + i)
+	_theme_submenu.id_pressed.connect(_on_menu_id_pressed)
+	_popup.add_child(_theme_submenu)
+	_popup.add_submenu_item("Theme", "ThemeMenu")
+
+	# Style submenu (density presets).
+	_style_submenu = PopupMenu.new()
+	_style_submenu.name = "StyleMenu"
+	var style_keys := StyleConfig.ordered_keys()
+	for i in range(style_keys.size()):
+		_style_submenu.add_radio_check_item(
+			StyleConfig.density(style_keys[i])["label"], _ID_STYLE_BASE + i)
+	_style_submenu.id_pressed.connect(_on_menu_id_pressed)
+	_popup.add_child(_style_submenu)
+	_popup.add_submenu_item("Style", "StyleMenu")
+
+	_popup.add_separator()
+	_popup.add_check_item("Shadows", _ID_SHADOWS)
+	_popup.add_check_item("Animations", _ID_ANIMATIONS)
+	_popup.id_pressed.connect(_on_menu_id_pressed)
+
+
+## Sync the radio-check marks in each submenu with the current settings.
+func _sync_menu_checks() -> void:
+	if _font_submenu:
+		_check_only(_font_submenu, FontConfig.family_index(_font_family))
+	if _size_submenu:
+		var size_idx := _SIZE_OPTIONS.find(_font_size)
+		if size_idx == -1:
+			# Find nearest preset.
+			var best := 0
+			var best_d := 999
+			for i in range(_SIZE_OPTIONS.size()):
+				var d: int = abs(int(_SIZE_OPTIONS[i]) - _font_size)
+				if d < best_d:
+					best_d = d
+					best = i
+			size_idx = best
+		_check_only(_size_submenu, size_idx)
+	if _theme_submenu:
+		_check_only(_theme_submenu, ColorConfig.index_of(_color_key))
+	if _style_submenu:
+		_check_only(_style_submenu, StyleConfig.index_of(_density_key))
+	if _popup:
+		var sidx := _popup.get_item_index(_ID_SHADOWS)
+		if sidx >= 0:
+			_popup.set_item_checked(sidx, _shadows_on)
+		var aidx := _popup.get_item_index(_ID_ANIMATIONS)
+		if aidx >= 0:
+			_popup.set_item_checked(aidx, _animations_on)
+
+
+func _check_only(menu: PopupMenu, sel: int) -> void:
+	for i in range(menu.item_count):
+		menu.set_item_checked(i, i == sel)
+
+
+## Single handler dispatched by every top-level + submenu id_pressed signal.
+func _on_menu_id_pressed(id: int) -> void:
+	if id == _ID_OPEN:
+		_on_open_workspace()
+	elif id == _ID_NEW:
+		_on_new_note()
+	elif id == _ID_SAVE:
+		_on_save()
+	elif id == _ID_RUN:
+		_on_run()
+	elif id == _ID_FORCE:
+		_on_force_run()
+	elif id == _ID_EXPORT:
+		_on_export_html()
+	elif id == _ID_VIEW:
+		_toggle_view_mode()
+	elif id == _ID_SHADOWS:
+		_shadows_on = not _shadows_on
+		StyleConfig.save(_density_key, _shadows_on, _animations_on)
+		_apply_visual_style()
+		_sync_menu_checks()
+	elif id == _ID_ANIMATIONS:
+		_animations_on = not _animations_on
+		StyleConfig.save(_density_key, _shadows_on, _animations_on)
+		_sync_menu_checks()
+	elif id >= _ID_FONT_BASE and id < _ID_SIZE_BASE:
+		_on_font_family_changed(id - _ID_FONT_BASE)
+		_sync_menu_checks()
+	elif id >= _ID_SIZE_BASE and id < _ID_THEME_BASE:
+		_font_size = int(_SIZE_OPTIONS[id - _ID_SIZE_BASE])
+		FontConfig.save_pair(_font_size, _font_family)
+		_apply_font()
+		_sync_menu_checks()
+	elif id >= _ID_THEME_BASE and id < _ID_STYLE_BASE:
+		_on_color_changed(id - _ID_THEME_BASE)
+		_sync_menu_checks()
+	elif id >= _ID_STYLE_BASE and id < _ID_SHADOWS:
+		_on_density_changed(id - _ID_STYLE_BASE)
+		_sync_menu_checks()
+
+
 ## Task 60 — colour scheme handler.
 func _on_color_changed(idx: int) -> void:
 	var keys := ColorConfig.ordered_keys()
@@ -837,6 +934,12 @@ func _apply_view_mode() -> void:
 		# Task 58 — show the action, not the current mode, so the label
 		# always says what clicking will do.
 		_view_mode_btn.text = "Show Source" if _is_notebook_view else "Show Notebook"
+	# Task 66 — update the View item label inside the MenuButton popup.
+	if _popup:
+		var view_idx := _popup.get_item_index(_ID_VIEW)
+		if view_idx >= 0:
+			_popup.set_item_text(view_idx,
+				"Show Source" if _is_notebook_view else "Show Notebook")
 	if _is_notebook_view:
 		_rebuild_rendered_cells()
 		_hide_plot_strip()    # strip is the source-mode preview; not needed here

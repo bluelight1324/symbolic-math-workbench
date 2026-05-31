@@ -63,3 +63,5 @@ increase the number of available fonts, and then do 1 doc.
 the font on the left panel should match the overall font 
 do not implement just doc what options can u provide to use godot to beautify the ui to the maximum possible extent, just do a doc.
 update github and  create 1 doc.
+put the buttons in the screenshot under one dropdown menu button . do 1 doc.
+update github as v1 .  create 1 doc

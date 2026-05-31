@@ -145,6 +145,8 @@ func _ready() -> void:
 		_open_plot_notebook_and_run.call_deferred()
 	if "--demo-task37" in args or OS.get_cmdline_args().has("--demo-task37"):
 		_open_task37_and_run.call_deferred()
+	if "--demo-popupmenu" in args or OS.get_cmdline_args().has("--demo-popupmenu"):
+		_open_notebook_popupmenu_demo.call_deferred()
 	if "--demo-fontdrop" in args or OS.get_cmdline_args().has("--demo-fontdrop"):
 		# Tiny convenience flag: pre-select the Facebook font so the
 		# screenshot shows the dropdown's new option highlighted.
@@ -203,6 +205,15 @@ func _open_notebook() -> void:
 	var sample := "i:/readtgodot/app/notebooks_sample/algebra.md"
 	if FileAccess.file_exists(sample):
 		_notebook._open_file_at(sample)
+
+
+func _open_notebook_popupmenu_demo() -> void:
+	if _notebook == null:
+		return
+	await get_tree().create_timer(0.6).timeout
+	var btn := _notebook.get("_menu_btn") as MenuButton
+	if btn and btn.get_popup():
+		btn.get_popup().popup()
 
 
 func _open_font_dropdown_demo() -> void:
