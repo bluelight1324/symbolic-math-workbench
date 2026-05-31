@@ -40,6 +40,8 @@ var _wizard: HelpWizard
 var _notebook: NotebookView
 var _advanced: AdvancedView
 var _pkg_settings: PackageSettings
+var _icon_menubar: IconMenuBar    # task 69 — kept so we can add the Notebook
+                                   # category to it after _notebook is created.
 var _calc_root: Control
 
 # per-request routing: id -> {kind, node}
@@ -106,6 +108,18 @@ func _ready() -> void:
 	_notebook = NotebookViewScript.new() as NotebookView
 	add_child(_notebook)
 	_notebook.visible = false
+	# Task 69 — put the notebook menu as the FIRST button in the global
+	# IconMenuBar at the top-left, styled like the other category buttons.
+	# Reparents the notebook view's standalone PopupMenu into the IconMenuBar.
+	if _icon_menubar:
+		var notebook_popup := _notebook.get_menu_popup()
+		if notebook_popup:
+			# Detach from notebook before reparenting (avoids "already has parent" errors).
+			if notebook_popup.get_parent():
+				notebook_popup.get_parent().remove_child(notebook_popup)
+			var nb_btn := _icon_menubar.add_category(
+				"☰", "Notebook", notebook_popup, Color(0.55, 0.65, 0.95))
+			_icon_menubar.move_child(nb_btn, 0)
 	# Reserve room at the top for the IconMenuBar toolbar — the notebook view
 	# is now the default opening pane (replacing the calculator's middle area),
 	# but the toolbar above must stay visible and unchanged.
@@ -208,12 +222,17 @@ func _open_notebook() -> void:
 
 
 func _open_notebook_popupmenu_demo() -> void:
-	if _notebook == null:
+	# Task 69 — the notebook popup now lives in the IconMenuBar. Find the
+	# first child button of _icon_menubar (the Notebook button) and pop its
+	# attached menu.
+	if _icon_menubar == null:
 		return
 	await get_tree().create_timer(0.6).timeout
-	var btn := _notebook.get("_menu_btn") as MenuButton
-	if btn and btn.get_popup():
-		btn.get_popup().popup()
+	for child in _icon_menubar.get_children():
+		if child is Button:
+			# IconMenuBar's _show_menu uses the same lookup, so simulate it.
+			_icon_menubar.call("_show_menu", child)
+			return
 
 
 func _open_font_dropdown_demo() -> void:
@@ -560,6 +579,8 @@ func _build_ui() -> void:
 func _build_menubar(parent: Control) -> void:
 	var bar := IconMenuBar.new()
 	bar.custom_minimum_size = Vector2(0, 70)
+	_icon_menubar = bar    # task 69 — exposed so the Notebook category can
+	                        # be added after _notebook is created.
 
 	# View — window-size + notebook toggle.
 	var view_menu := PopupMenu.new()

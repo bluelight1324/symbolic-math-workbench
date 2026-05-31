@@ -67,6 +67,21 @@ const SCHEMES := {
 		"text":        Color(0.396, 0.482, 0.514),
 		"muted":       Color(0.576, 0.631, 0.631),
 	},
+	# Task 64 §F-38 / task 68 — deuteranopia / protanopia-friendly palette.
+	# Blue + orange instead of red + green so the source/result distinction
+	# survives common red-green colour-vision deficiencies.
+	"colorblind": {
+		"label": "Colour-blind safe",
+		"bg":          Color(0.09, 0.10, 0.13),
+		"src_bg":      Color(0.10, 0.14, 0.22),
+		"src_border":  Color(0.27, 0.55, 0.88),   # azure
+		"src_chip":    Color(0.50, 0.78, 1.00),
+		"res_bg":      Color(0.20, 0.13, 0.06),
+		"res_border":  Color(0.95, 0.55, 0.10),   # amber
+		"res_chip":    Color(1.00, 0.78, 0.30),
+		"text":        Color(0.94, 0.96, 0.98),
+		"muted":       Color(0.70, 0.74, 0.80),
+	},
 	"high_contrast": {
 		"label": "High Contrast",
 		"bg":          Color.BLACK,
@@ -101,7 +116,8 @@ static func scheme(key: String) -> Dictionary:
 
 
 static func ordered_keys() -> Array:
-	return ["dark", "light", "solarized_dark", "solarized_light", "high_contrast"]
+	return ["dark", "light", "solarized_dark", "solarized_light",
+		"colorblind", "high_contrast"]
 
 
 static func index_of(key: String) -> int:

@@ -102,6 +102,7 @@ const _ID_FONT_BASE := 1000
 const _ID_SIZE_BASE := 2000
 const _ID_THEME_BASE := 3000
 const _ID_STYLE_BASE := 4000
+const _ID_LOOKS_BASE := 6000
 
 # Older "strip below editor" plot from task 35 v1 — kept as a fallback
 # render target while in source mode.
@@ -116,6 +117,12 @@ var _run_queue: Array = []
 var _run_results: Dictionary = {}  # block-index -> {new_kind, new_body}
 var _run_blocks: Array = []
 var _run_active := false
+
+
+## Task 69 — exposed for main.gd so the global IconMenuBar can adopt this
+## popup as its first category button.
+func get_menu_popup() -> PopupMenu:
+	return _popup
 
 
 func _ready() -> void:
@@ -182,16 +189,12 @@ func _build_ui() -> void:
 	_path_label.text = "(no workspace open)"
 	_path_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	topbar.add_child(_path_label)
-	# Task 66 — all of the previous action-bar widgets (Open workspace, New
-	# note, Save, Run, Force re-run, Export HTML, Show Source, Font, Size,
-	# Theme, Style, Shadows, Animations) collapsed into one MenuButton with
-	# a popup tree of submenus + checkable items. The action bar is now just
-	# the workspace label on the left and this one button on the right.
-	_menu_btn = MenuButton.new()
-	_menu_btn.text = "☰  Notebook menu  ▾"
-	_menu_btn.tooltip_text = "All notebook actions and preferences"
-	_menu_btn.custom_minimum_size = Vector2(200, 0)
-	topbar.add_child(_menu_btn)
+	# Task 66 — every previous action-bar widget (Open workspace, New note,
+	# Save, Run, Force re-run, Export HTML, Show Source, Font, Size, Theme,
+	# Style, Shadows, Animations) lives in one PopupMenu now.
+	# Task 69 — that popup is *hosted by the global IconMenuBar* on top of
+	# the app (as its first category button). The notebook view's own
+	# MenuButton has been removed from the action bar.
 	_build_menubar_popup()
 
 	# Split: sidebar | editor.
@@ -204,6 +207,10 @@ func _build_ui() -> void:
 	_sidebar_tree.custom_minimum_size = Vector2(240, 0)
 	_sidebar_tree.hide_root = false
 	_sidebar_tree.allow_reselect = true
+	# Task 68 §I-51 — long filenames truncate with an ellipsis instead of
+	# clipping at the column edge.
+	_sidebar_tree.columns = 1
+	_sidebar_tree.column_titles_visible = false
 	_sidebar_tree.item_activated.connect(_on_tree_item_activated)
 	split.add_child(_sidebar_tree)
 
@@ -227,10 +234,31 @@ func _build_ui() -> void:
 	_rendered_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_rendered_scroll.visible = false
 	_editor_container.add_child(_rendered_scroll)
+	# Task 68 §I-52 — cap the reading column at 1100 px so ultra-wide
+	# displays don't render a half-meter-long line of text. A centring
+	# CenterContainer would stretch the inner VBox; we wrap in a
+	# MarginContainer that just maxes the inner width.
+	var reading_wrap := HBoxContainer.new()
+	reading_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rendered_scroll.add_child(reading_wrap)
+	var left_pad := Control.new()
+	left_pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	reading_wrap.add_child(left_pad)
 	_rendered_box = VBoxContainer.new()
 	_rendered_box.add_theme_constant_override("separation", 12)
-	_rendered_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rendered_scroll.add_child(_rendered_box)
+	_rendered_box.custom_minimum_size = Vector2(0, 0)
+	_rendered_box.size_flags_horizontal = Control.SIZE_FILL
+	# 1100 px is the cap; falls back to the parent width if narrower.
+	_rendered_box.custom_minimum_size = Vector2(0, 0)
+	_rendered_box.size_flags_stretch_ratio = 0.0
+	# Use a fixed-width inner column via a sized Control wrapper.
+	var inner := MarginContainer.new()
+	inner.custom_minimum_size = Vector2(1100, 0)
+	inner.add_child(_rendered_box)
+	reading_wrap.add_child(inner)
+	var right_pad := Control.new()
+	right_pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	reading_wrap.add_child(right_pad)
 
 	# Inline plot strip — appears only when a cas-plot block has just produced
 	# samples; hidden by default so the notebook view never has a permanent
@@ -655,11 +683,15 @@ func _hide_plot_strip() -> void:
 		_plot_panel.clear_plot()
 
 
-## Task 66 — build the MenuButton's popup tree.
+## Task 66 — build the menu's popup tree.
 ## Top-level items: file/run actions, then submenus for Font/Size/Theme/Style,
 ## then checkable items for Shadows/Animations.
+## Task 69 — the popup is now a standalone PopupMenu that the global
+## IconMenuBar attaches to its first button. The notebook view's own
+## MenuButton is gone (see _build_ui).
 func _build_menubar_popup() -> void:
-	_popup = _menu_btn.get_popup()
+	_popup = PopupMenu.new()
+	add_child(_popup)
 	_popup.clear()
 	_popup.add_item("Open workspace…", _ID_OPEN)
 	_popup.add_item("New note", _ID_NEW)
@@ -715,6 +747,17 @@ func _build_menubar_popup() -> void:
 	_popup.add_child(_style_submenu)
 	_popup.add_submenu_item("Style", "StyleMenu")
 
+	_popup.add_separator()
+	# Task 68 §J — "Looks" preset bundles.
+	var looks_submenu := PopupMenu.new()
+	looks_submenu.name = "LooksMenu"
+	var look_keys := LooksConfig.ordered_keys()
+	for i in range(look_keys.size()):
+		looks_submenu.add_item(
+			LooksConfig.get_look(look_keys[i])["label"], _ID_LOOKS_BASE + i)
+	looks_submenu.id_pressed.connect(_on_menu_id_pressed)
+	_popup.add_child(looks_submenu)
+	_popup.add_submenu_item("Looks  ⭐", "LooksMenu")
 	_popup.add_separator()
 	_popup.add_check_item("Shadows", _ID_SHADOWS)
 	_popup.add_check_item("Animations", _ID_ANIMATIONS)
@@ -795,6 +838,33 @@ func _on_menu_id_pressed(id: int) -> void:
 	elif id >= _ID_STYLE_BASE and id < _ID_SHADOWS:
 		_on_density_changed(id - _ID_STYLE_BASE)
 		_sync_menu_checks()
+	elif id >= _ID_LOOKS_BASE and id < _ID_LOOKS_BASE + 100:
+		_apply_look(LooksConfig.ordered_keys()[id - _ID_LOOKS_BASE])
+
+
+## Task 68 §J — apply a "Looks" preset: every constituent setting at once.
+func _apply_look(key: String) -> void:
+	var look: Dictionary = LooksConfig.get_look(key)
+	# Theme
+	_color_key = look["color"]
+	_color_scheme = ColorConfig.scheme(_color_key)
+	ColorConfig.save_key(_color_key)
+	# Density
+	_density_key = look["density"]
+	_density = StyleConfig.density(_density_key)
+	# Shadows / Animations
+	_shadows_on = bool(look["shadows"])
+	_animations_on = bool(look["animations"])
+	StyleConfig.save(_density_key, _shadows_on, _animations_on)
+	# Font family + size
+	_font_family = String(look["font_family"])
+	_font_resource = FontConfig.font_resource(_font_family)
+	_font_size = int(look["font_size"])
+	FontConfig.save_pair(_font_size, _font_family)
+	_apply_font()
+	_apply_visual_style()
+	_sync_menu_checks()
+	_status.text = "Look applied: %s" % look["label"]
 
 
 ## Task 60 — colour scheme handler.
@@ -1013,20 +1083,63 @@ func _emit_prose_cell(text: String) -> void:
 	lbl.scroll_active = false
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lbl.add_theme_font_size_override("normal_font_size", 16)
-	# Tiny markdown-ish rendering: # / ## headings, otherwise paragraphs.
+	# Task 68 §C-20 + §C-22 — drop-cap on `# heading` paragraphs, smart-quote
+	# substitution everywhere. Tiny markdown-ish rendering: # / ## headings,
+	# otherwise paragraphs.
 	var converted := PackedStringArray()
+	var first_h1 := true
 	for line in t.split("\n"):
 		var stripped := line.strip_edges()
 		if stripped.begins_with("## "):
-			converted.append("[font_size=22][b]%s[/b][/font_size]" % stripped.substr(3))
+			converted.append("[font_size=22][b]%s[/b][/font_size]"
+				% _smart_quotes(stripped.substr(3)))
 		elif stripped.begins_with("# "):
-			converted.append("[font_size=26][b]%s[/b][/font_size]" % stripped.substr(2))
+			# Drop-cap: the first character of the very first H1 in a cell
+			# gets +8 pt over the heading size.
+			var headline := stripped.substr(2)
+			if first_h1 and headline.length() > 0:
+				first_h1 = false
+				converted.append("[font_size=34][b]%s[/b][/font_size][font_size=26][b]%s[/b][/font_size]" % [
+					_smart_quotes(headline.substr(0, 1)),
+					_smart_quotes(headline.substr(1))])
+			else:
+				converted.append("[font_size=26][b]%s[/b][/font_size]"
+					% _smart_quotes(headline))
 		else:
-			converted.append(line)
+			converted.append(_smart_quotes(line))
 	lbl.text = "\n".join(converted)
 	lbl.add_theme_color_override("default_color", _color_scheme["text"])
 	_font_apply(lbl)
 	_rendered_box.add_child(lbl)
+
+
+## Task 68 §C-22 — smart-quote / em-dash / ellipsis substitution in prose.
+## Conservative: only replace patterns that are *unambiguously* the typed
+## ASCII shortcuts for the typographic glyph. Inline code segments (between
+## backticks) are skipped so REDUCE syntax isn't mangled.
+func _smart_quotes(s: String) -> String:
+	# Split on backticks; only transform odd-indexed chunks (outside `code`).
+	var parts := s.split("`")
+	for i in range(parts.size()):
+		if i % 2 == 1:
+			continue   # inside a `code` segment
+		var t: String = parts[i]
+		t = t.replace("...", "…")
+		t = t.replace("---", "—")
+		t = t.replace("--", "—")
+		# Simple curly quotes — leading space/start → opening, otherwise closing.
+		var out := ""
+		var prev := ""
+		for ch in t:
+			if ch == "\"":
+				out += "“" if (prev == "" or prev == " " or prev == "\t" or prev == "\n") else "”"
+			elif ch == "'":
+				out += "‘" if (prev == "" or prev == " " or prev == "\t" or prev == "\n") else "’"
+			else:
+				out += ch
+			prev = ch
+		parts[i] = out
+	return "`".join(parts)
 
 
 func _emit_block_cell(block: Dictionary, paired_result) -> void:
@@ -1036,6 +1149,10 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	var src_panel := PanelContainer.new()
 	src_panel.add_theme_stylebox_override("panel",
 		_make_cell_box(_color_scheme["src_bg"], _color_scheme["src_border"]))
+	# Task 68 §D-23 — hover state.
+	_attach_hover(src_panel, _color_scheme["src_bg"], _color_scheme["src_border"])
+	# Task 68 §D-27 — right-click → Copy / Re-run.
+	_attach_cell_context_menu(src_panel, block["body"].strip_edges(), block["kind"])
 	var src_v := VBoxContainer.new()
 	src_v.add_theme_constant_override("separation", int(_density["chip_offset"]))
 	src_panel.add_child(src_v)
@@ -1071,6 +1188,9 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	var res_panel := PanelContainer.new()
 	res_panel.add_theme_stylebox_override("panel",
 		_make_cell_box(_color_scheme["res_bg"], _color_scheme["res_border"]))
+	_attach_hover(res_panel, _color_scheme["res_bg"], _color_scheme["res_border"])
+	_attach_cell_context_menu(res_panel,
+		NotebookRunner.payload_only(paired_result["body"]), "cas-result")
 	var res_v := VBoxContainer.new()
 	res_v.add_theme_constant_override("separation", int(_density["chip_offset"]))
 	res_panel.add_child(res_v)
@@ -1088,6 +1208,42 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	_font_apply(res_text)
 	res_v.add_child(res_text)
 	_rendered_box.add_child(res_panel)
+
+
+## Task 68 §D-23 — hover state. Brightens the cell's left-accent border on
+## mouse-over and reverts on mouse-out. Cheap signal pair per cell; no Tween.
+func _attach_hover(panel: PanelContainer, bg: Color, border: Color) -> void:
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var hover_box := _make_cell_box(bg, border.lerp(Color.WHITE, 0.4))
+	var base_box := panel.get_theme_stylebox("panel")
+	panel.mouse_entered.connect(func():
+		panel.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		panel.add_theme_stylebox_override("panel", hover_box))
+	panel.mouse_exited.connect(func():
+		panel.mouse_default_cursor_shape = Control.CURSOR_ARROW
+		panel.add_theme_stylebox_override("panel", base_box))
+
+
+## Task 68 §D-27 — right-click → small PopupMenu with Copy / Re-run actions.
+func _attach_cell_context_menu(panel: PanelContainer, body: String, kind: String) -> void:
+	panel.gui_input.connect(func(ev):
+		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_RIGHT \
+				and ev.pressed:
+			var menu := PopupMenu.new()
+			menu.add_item("Copy source")
+			menu.add_separator()
+			if kind != "cas-result" and kind != "cas-test-result" \
+					and kind != "cas-derive-result" and kind != "cas-plot-result":
+				menu.add_item("Re-run this block (Force re-run all)")
+			add_child(menu)
+			menu.id_pressed.connect(func(id):
+				if id == 0:
+					DisplayServer.clipboard_set(body)
+					_status.text = "Copied: %s" % body.substr(0, 40).replace("\n", " ")
+				elif id == 2:
+					_on_force_run()
+				menu.queue_free())
+			menu.popup(Rect2i(Vector2i(ev.global_position), Vector2i(220, 0))))
 
 
 ## One StyleBoxFlat for a cell — colour / padding / corner radius / border
