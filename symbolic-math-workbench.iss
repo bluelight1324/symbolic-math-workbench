@@ -71,7 +71,7 @@ Source: "README.md"; DestDir: "{app}"; Components: docs; Flags: ignoreversion
 Source: "LICENSE.txt"; DestDir: "{app}"; Components: app; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\bin\Godot.exe"; Parameters: "--path ""{app}"""; WorkingDir: "{app}"; IconIndex: 0
+Name: "{group}\{#MyAppName}"; Filename: "{app}\bin\Godot.exe"; Parameters: "--path ""{app}"" --run"; WorkingDir: "{app}"; IconIndex: 0
 Name: "{group}\Open Sample Notebooks"; Filename: "{userdocs}\Symbolic Math Workbench\notebooks"; Components: samples
 Name: "{group}\Documentation"; Filename: "{app}\docs\README.md"; Components: docs
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
@@ -82,7 +82,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; OnlyBelowVersion: 6.1
 
 [Run]
-Filename: "{app}\bin\Godot.exe"; Parameters: "--path ""{app}"" --verbose"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: shellexec postinstall skipifsilent; WorkingDir: "{app}"
+Filename: "{app}\bin\Godot.exe"; Parameters: "--path ""{app}"" --run"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: shellexec postinstall skipifsilent; WorkingDir: "{app}"
 
 [InstallDelete]
 ; Clean up old files if upgrading
