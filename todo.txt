@@ -68,3 +68,21 @@ update github as v1 .  create 1 doc
 do all of  the task 64 and then do 1 doc 
 put the notebok menu as the first button on top left similar to the other buttons. do 1 doc later.
 update github and do 1 doc
+
+create a  file and ask the app to integrate the integral:
+
+∫
+𝑒
+𝑥
+2
+log
+⁡
+(
+1
++
+𝑥
+3
+)
+ 
+𝑑
+𝑥
