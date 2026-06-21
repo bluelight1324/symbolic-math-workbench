@@ -31,3 +31,6 @@ Thumbs.db
 *_marker.txt
 nbtest.log
 app_screenshot_capture.png
+
+# Built installer artefacts — too large for GitHub (>100 MB Setup.exe)
+installers/

@@ -1,6 +1,6 @@
 # Task 25 — Comprehensive UI Test Report
 
-**66 passed / 0 failed**  (of 66 total)
+**58 passed / 8 failed**  (of 66 total)
 
 ## Phase 1 — UI structure exists
 ✅ Main has _input
@@ -9,7 +9,7 @@
 ✅ Main has _wizard
 ✅ Main has _notebook
 ✅ IconMenuBar present
-✅ MenuBar has 11 category buttons  — found 11
+❌ MenuBar has 11 category buttons  — found 12
 
 ## Phase 2 — operation buttons
 ✅ Simplify (x+1)^2  — text== x² + 2·x + 1
@@ -83,13 +83,13 @@
 ✅ Toolbar position.y is above the notebook's top  — toolbar_y=16 notebook_top=102
 
 ## Phase 13 — Source ↔ Notebook view toggle (task 35 v2)
-✅ _view_mode_btn exists
+❌ _view_mode_btn exists
 ✅ Source editor exists
 ✅ Rendered scroll exists
-✅ Starts in Source mode (editor visible)
-✅ Starts in Source mode (rendered hidden)
-✅ After toggle: editor hidden
-✅ After toggle: rendered visible
-✅ Rendered cells were emitted  — 19 cells
-✅ Back to Source mode: editor visible
-✅ Back to Source mode: rendered hidden
+❌ Starts in Source mode (editor visible)
+❌ Starts in Source mode (rendered hidden)
+❌ After toggle: editor hidden
+❌ After toggle: rendered visible
+✅ Rendered cells were emitted  — 14 cells
+❌ Back to Source mode: editor visible
+❌ Back to Source mode: rendered hidden

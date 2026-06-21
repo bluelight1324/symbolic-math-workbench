@@ -12,13 +12,15 @@ const DEFAULT_DENSITY := "default"
 # and rendered_box use. Picking a density is one click; advanced users can
 # still override individual values later if needed.
 const DENSITIES := {
+	# Task 96 — chip_size doubled so the cell kind/result chips stay legible
+	# next to the now-doubled cell body text.
 	"compact": {
 		"label":          "Compact",
 		"cell_separation": 6,    # _rendered_box.add_theme_constant_override("separation", N)
 		"cell_padding":    6,    # StyleBoxFlat.content_margin_all on each cell panel
 		"corner_radius":   4,    # StyleBoxFlat.set_corner_radius_all
 		"border_width":    2,    # StyleBoxFlat.border_width_left
-		"chip_size":       12,
+		"chip_size":       24,
 		"chip_offset":     1,    # extra v-space between chip label and content
 	},
 	"default": {
@@ -27,7 +29,7 @@ const DENSITIES := {
 		"cell_padding":    8,
 		"corner_radius":   6,
 		"border_width":    3,
-		"chip_size":       13,
+		"chip_size":       26,
 		"chip_offset":     2,
 	},
 	"comfortable": {
@@ -36,7 +38,7 @@ const DENSITIES := {
 		"cell_padding":    14,
 		"corner_radius":   10,
 		"border_width":    4,
-		"chip_size":       14,
+		"chip_size":       28,
 		"chip_offset":     4,
 	},
 }

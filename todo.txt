@@ -86,3 +86,19 @@ log
  
 𝑑
 𝑥
+
+create a modern installer for the app
+does the installer work.
+ installer has not beeen updated see screenshot
+ 93. the root folder name was changed. check if that has affected any files or folders. do 1 doc
+ 94. while kepping the buttons on top all the same .make the app resemble matlab ui as much as u can do 1 doc.
+ 95. do a thorough test of th math function via the new ui.
+ use verbal math command and do the test. do 1 doc.
+ 96. double font size throughout the app on startup. provide a run all button next 
+ to the other buttons at the last right.  allow each cell to be executed
+ individually. do 1 doc.
+ 97.change the font throughout the app  to the same one used by matlab if available,else use verdana. do 1 docthe font 
+ 98. make the font on the top buttons bolder. do 1 doc
+ 99. integrate plotting in the notebook itself, instead of a separate ploter window.
+ do 1 doc.
+ 100. update github. and do 1 doc.

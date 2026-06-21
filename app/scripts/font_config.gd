@@ -5,8 +5,10 @@ extends RefCounted
 ## rewritten whenever the user changes the dropdown / spinbox. (Task 58.)
 
 const PATH := "user://font.cfg"
-const DEFAULT_SIZE := 18
-const DEFAULT_FAMILY := "default"
+# Task 96 — default notebook font size doubled at startup (was 18).
+const DEFAULT_SIZE := 36
+# Task 97 — default to MATLAB's font (Courier New, else Verdana) throughout.
+const DEFAULT_FAMILY := "matlab"
 
 # Each entry: a key for persistence + a label for the OptionButton + a list of
 # system font names tried in order (first available wins). An empty `names`
@@ -25,6 +27,12 @@ const FAMILIES := [
 	{"key": "mono",    "label": "Monospace", "names": [
 		"JetBrains Mono", "Cascadia Code", "Cascadia Mono",
 		"Consolas", "Courier New", "monospace"]},
+
+	# Task 97 — the font MATLAB uses. MATLAB's fixed-width / editor font
+	# resolves to "Courier New" on Windows (its "Monospaced" logical font);
+	# fall back to Verdana when Courier New is unavailable, as requested.
+	{"key": "matlab",  "label": "MATLAB (Courier New)", "names": [
+		"Courier New", "Verdana"]},
 
 	# Programming-specific (each surfaced individually for users who care)
 	{"key": "fira_code",  "label": "Fira Code", "names": [

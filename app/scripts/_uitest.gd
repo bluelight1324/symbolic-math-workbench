@@ -10,8 +10,8 @@ extends Node
 ## quirks). The window is invisible because we set it minimised before
 ## starting; the test never depends on what's on screen.
 
-const MARKER := "i:/readtgodot/uitest_marker.txt"
-const REPORT := "i:/readtgodot/task25_uitest_report.md"
+const MARKER := "i:/mathdot/uitest_marker.txt"
+const REPORT := "i:/mathdot/task25_uitest_report.md"
 
 var _main: Node
 var _log: PackedStringArray = []

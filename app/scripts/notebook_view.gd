@@ -40,6 +40,13 @@ var _sidebar_tree: Tree
 var _editor: CodeEdit
 var _status: Label
 var _path_label: Label
+# Task 94 — MATLAB-style docked-panel title bars + their labels (recoloured by
+# the active scheme; the editor title tracks the open file name).
+var _sidebar_title_bar: PanelContainer
+var _sidebar_title_lbl: Label
+var _editor_title_bar: PanelContainer
+var _editor_title_lbl: Label
+var _status_bar: PanelContainer
 var _file_dialog: FileDialog
 var _open_file_dialog: FileDialog
 var _new_name_dialog: AcceptDialog
@@ -104,11 +111,8 @@ const _ID_THEME_BASE := 3000
 const _ID_STYLE_BASE := 4000
 const _ID_LOOKS_BASE := 6000
 
-# Older "strip below editor" plot from task 35 v1 — kept as a fallback
-# render target while in source mode.
-var _plot_strip: VBoxContainer
-var _plot_caption: Label
-var _plot_panel: Control
+# Task 99 — plotting is now fully inline in the notebook cell stack; the old
+# separate "plot strip below the editor" (task 35 v1) was removed.
 
 # Async run state: while running, evaluate blocks one at a time so results
 # correlate by FIFO. _pending[id] = {pair, new_kind, on_result: Callable}
@@ -129,6 +133,9 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	_build_ui()
+	# Task 94 — a fresh install (no saved colour config yet) opens in the full
+	# MATLAB look; returning users keep whatever they last chose.
+	var first_run := not FileAccess.file_exists(ColorConfig.PATH)
 	MathEngine.result_ready.connect(_on_engine_result)
 	# Task 58 — load persisted font selection and apply it.
 	_font_size = FontConfig.load_size()
@@ -163,6 +170,11 @@ func _ready() -> void:
 
 	# Task 58 — notebook view is the default; reflect in the toggle label.
 	_apply_view_mode()
+
+	# Task 94 — apply the bundled MATLAB look on first launch (after the UI and
+	# all defaults are in place, so every constituent setting takes effect).
+	if first_run:
+		_apply_look("matlab")
 
 
 func _build_ui() -> void:
@@ -203,8 +215,19 @@ func _build_ui() -> void:
 	split.split_offset = 280
 	v.add_child(split)
 
+	# Task 94 — MATLAB "Current Folder" docked panel wrapping the file tree.
+	var sidebar_col := VBoxContainer.new()
+	sidebar_col.add_theme_constant_override("separation", 0)
+	sidebar_col.custom_minimum_size = Vector2(240, 0)
+	var sb_title := _make_title_bar("Current Folder")
+	_sidebar_title_bar = sb_title[0]
+	_sidebar_title_lbl = sb_title[1]
+	sidebar_col.add_child(_sidebar_title_bar)
+	split.add_child(sidebar_col)
+
 	_sidebar_tree = Tree.new()
 	_sidebar_tree.custom_minimum_size = Vector2(240, 0)
+	_sidebar_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_sidebar_tree.hide_root = false
 	_sidebar_tree.allow_reselect = true
 	# Task 68 §I-51 — long filenames truncate with an ellipsis instead of
@@ -212,14 +235,26 @@ func _build_ui() -> void:
 	_sidebar_tree.columns = 1
 	_sidebar_tree.column_titles_visible = false
 	_sidebar_tree.item_activated.connect(_on_tree_item_activated)
-	split.add_child(_sidebar_tree)
+	sidebar_col.add_child(_sidebar_tree)
+
+	# Task 94 — editor column with a MATLAB-style title bar that shows the open
+	# file name (like MATLAB's "Editor – name.md" docked tab).
+	var editor_col := VBoxContainer.new()
+	editor_col.add_theme_constant_override("separation", 0)
+	editor_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	editor_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var ed_title := _make_title_bar("Editor")
+	_editor_title_bar = ed_title[0]
+	_editor_title_lbl = ed_title[1]
+	editor_col.add_child(_editor_title_bar)
+	split.add_child(editor_col)
 
 	# A container that holds both the raw source CodeEdit and the rendered
 	# notebook view; only one is visible at a time (task 35 v2).
 	_editor_container = Control.new()
 	_editor_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_editor_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	split.add_child(_editor_container)
+	editor_col.add_child(_editor_container)
 
 	_editor = CodeEdit.new()
 	_editor.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -260,35 +295,16 @@ func _build_ui() -> void:
 	right_pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	reading_wrap.add_child(right_pad)
 
-	# Inline plot strip — appears only when a cas-plot block has just produced
-	# samples; hidden by default so the notebook view never has a permanent
-	# plot pane (task 35).
-	_plot_strip = VBoxContainer.new()
-	_plot_strip.visible = false
-	_plot_strip.add_theme_constant_override("separation", 4)
-	v.add_child(_plot_strip)
-	var plot_header := HBoxContainer.new()
-	plot_header.add_theme_constant_override("separation", 8)
-	_plot_strip.add_child(plot_header)
-	_plot_caption = Label.new()
-	_plot_caption.add_theme_color_override("font_color", Color(0.6, 0.65, 0.7))
-	plot_header.add_child(_plot_caption)
-	var sp := Control.new()
-	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	plot_header.add_child(sp)
-	var hide_btn := Button.new()
-	hide_btn.text = "Hide plot"
-	hide_btn.pressed.connect(_hide_plot_strip)
-	plot_header.add_child(hide_btn)
-	_plot_panel = preload("res://scripts/plot_panel.gd").new()
-	_plot_panel.custom_minimum_size = Vector2(0, 220)
-	_plot_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_plot_strip.add_child(_plot_panel)
+	# Task 99 — plots are rendered INLINE inside the notebook cell stack (see
+	# _emit_block_cell), directly beneath the cas-plot block that produced them.
+	# The old separate bottom "plot strip" / plotter pane was removed.
 
-	# Status bar at the bottom.
+	# Status bar at the bottom — Task 94: a thin MATLAB-style status strip.
+	_status_bar = PanelContainer.new()
 	_status = Label.new()
 	_status.text = "Ready"
-	v.add_child(_status)
+	_status_bar.add_child(_status)
+	v.add_child(_status_bar)
 
 	# File dialogs (created once, reused).
 	_file_dialog = FileDialog.new()
@@ -373,9 +389,12 @@ func _open_file_at(path: String) -> void:
 	_editor.text = f.get_as_text()
 	f.close()
 	_open_file = path
+	# Task 94 — MATLAB-style "Editor – name.md" title.
+	if _editor_title_lbl:
+		_editor_title_lbl.text = "Editor  –  %s" % path.get_file()
 	_status.text = "Opened %s" % path
-	# A previously-shown plot belongs to the previous file; hide it.
-	_hide_plot_strip()
+	# Plot samples belong to the previous file; drop them so stale inline plots
+	# don't carry over.
 	_plot_samples_by_line.clear()
 	# Task 58 — stay in Notebook view (the primary display) on file open;
 	# the user opts into raw Source via the "Show Source" toggle.
@@ -488,6 +507,39 @@ func _run_internal(force: bool) -> void:
 	_dispatch_next_block()
 
 
+## Task 96 — execute a SINGLE cell (one source block, identified by its start
+## line) on demand, reusing the same evaluation pipeline as "Run notebook" but
+## with a one-entry queue. The cell's paired result is rewritten in place.
+func _run_one(block_start: int) -> void:
+	if _run_active:
+		_status.text = "Already running"
+		return
+	if not MathEngine.is_ready():
+		_status.text = "Engine not ready"
+		return
+	if _open_file.is_empty():
+		_status.text = "No file open"
+		return
+	# Persist first so the on-disk text matches what we re-evaluate / rewrite.
+	_on_save()
+	_run_blocks = NotebookRunner.parse_blocks(_editor.text)
+	var pairs := NotebookRunner.pair_blocks(_run_blocks)
+	_run_queue.clear()
+	_run_results.clear()
+	for p in pairs:
+		if int(p["source"]["start"]) == block_start:
+			var src: Dictionary = p["source"]
+			var src_hash := NotebookRunner.source_hash(src["body"], src["kind"])
+			_run_queue.append({"pair": p, "src_hash": src_hash})
+			break
+	if _run_queue.is_empty():
+		_status.text = "Cell not found"
+		return
+	_run_active = true
+	_status.text = "Running this cell…"
+	_dispatch_next_block()
+
+
 func _dispatch_next_block() -> void:
 	if _run_queue.is_empty():
 		_finish_run()
@@ -547,12 +599,11 @@ func _on_engine_result(id: int, output: String, is_error: bool) -> void:
 	var ok := not is_error
 	var payload := MathFormatter.to_display(output) if ok else MathFormatter.clean_error(output)
 	if src_kind == NotebookRunner.KIND_PLOT and ok:
-		# Task 35: store the samples by block start-line so the rendered
-		# (Mathematica-style) view can draw the plot directly beneath the
-		# cas-plot block. Also keep the strip-style fallback for source mode.
+		# Task 35 / 99: store the samples by block start-line so the rendered
+		# notebook view draws the plot INLINE directly beneath the cas-plot
+		# block (see _emit_block_cell). No separate plot pane.
 		var ys := MathFormatter.parse_number_list(output)
 		_plot_samples_by_line[int(pair["source"]["start"])] = ys
-		_show_plot_strip(pair["source"]["body"].strip_edges(), ys)
 		_finish_block_locally(entry, "plotted %d samples" % ys.size(), true)
 		return
 	if src_kind == NotebookRunner.KIND_TEST:
@@ -659,28 +710,9 @@ func _on_export_html() -> void:
 	_status.text = "Exported → %s" % out_path
 
 
-## Task 35 — inline plot strip control.
+## Plot x-range (the sampling grid the cas-plot command uses).
 const X_MIN := -10.0
 const X_MAX := 10.0
-
-func _show_plot_strip(expr: String, ys: PackedFloat64Array) -> void:
-	if _plot_strip == null or _plot_panel == null:
-		return
-	if ys.is_empty():
-		return
-	_plot_caption.text = "Plot:  %s   (%d samples · x ∈ [%d, %d])" % [
-		expr, ys.size(), int(X_MIN), int(X_MAX)]
-	if _plot_panel.has_method("set_samples"):
-		_plot_panel.set_samples(X_MIN, X_MAX, ys)
-	_plot_strip.visible = true
-
-
-func _hide_plot_strip() -> void:
-	if _plot_strip == null:
-		return
-	_plot_strip.visible = false
-	if _plot_panel and _plot_panel.has_method("clear_plot"):
-		_plot_panel.clear_plot()
 
 
 ## Task 66 — build the menu's popup tree.
@@ -908,6 +940,9 @@ func _apply_visual_style() -> void:
 	if _rendered_box:
 		_rendered_box.add_theme_constant_override(
 			"separation", int(_density["cell_separation"]))
+	# Task 94 — keep the chrome (title bars, tree, status) in step with the
+	# scheme so the whole view stays cohesive (MATLAB-light by default).
+	_apply_chrome_colors()
 	if _is_notebook_view:
 		_rebuild_rendered_cells()
 
@@ -1012,7 +1047,6 @@ func _apply_view_mode() -> void:
 				"Show Source" if _is_notebook_view else "Show Notebook")
 	if _is_notebook_view:
 		_rebuild_rendered_cells()
-		_hide_plot_strip()    # strip is the source-mode preview; not needed here
 
 
 func _rebuild_rendered_cells() -> void:
@@ -1082,29 +1116,34 @@ func _emit_prose_cell(text: String) -> void:
 	lbl.fit_content = true
 	lbl.scroll_active = false
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	lbl.add_theme_font_size_override("normal_font_size", 16)
+	lbl.add_theme_font_size_override("normal_font_size", _font_size)
 	# Task 68 §C-20 + §C-22 — drop-cap on `# heading` paragraphs, smart-quote
 	# substitution everywhere. Tiny markdown-ish rendering: # / ## headings,
 	# otherwise paragraphs.
+	# Task 96 — heading sizes scale with the (now doubled) base font instead of
+	# fixed points, so headings stay larger than body text.
+	var h2_size := _font_size + 6
+	var h1_size := _font_size + 10
+	var drop_size := _font_size + 18
 	var converted := PackedStringArray()
 	var first_h1 := true
 	for line in t.split("\n"):
 		var stripped := line.strip_edges()
 		if stripped.begins_with("## "):
-			converted.append("[font_size=22][b]%s[/b][/font_size]"
-				% _smart_quotes(stripped.substr(3)))
+			converted.append("[font_size=%d][b]%s[/b][/font_size]"
+				% [h2_size, _smart_quotes(stripped.substr(3))])
 		elif stripped.begins_with("# "):
 			# Drop-cap: the first character of the very first H1 in a cell
-			# gets +8 pt over the heading size.
+			# gets a bump over the heading size.
 			var headline := stripped.substr(2)
 			if first_h1 and headline.length() > 0:
 				first_h1 = false
-				converted.append("[font_size=34][b]%s[/b][/font_size][font_size=26][b]%s[/b][/font_size]" % [
-					_smart_quotes(headline.substr(0, 1)),
-					_smart_quotes(headline.substr(1))])
+				converted.append("[font_size=%d][b]%s[/b][/font_size][font_size=%d][b]%s[/b][/font_size]" % [
+					drop_size, _smart_quotes(headline.substr(0, 1)),
+					h1_size, _smart_quotes(headline.substr(1))])
 			else:
-				converted.append("[font_size=26][b]%s[/b][/font_size]"
-					% _smart_quotes(headline))
+				converted.append("[font_size=%d][b]%s[/b][/font_size]"
+					% [h1_size, _smart_quotes(headline)])
 		else:
 			converted.append(_smart_quotes(line))
 	lbl.text = "\n".join(converted)
@@ -1156,11 +1195,30 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	var src_v := VBoxContainer.new()
 	src_v.add_theme_constant_override("separation", int(_density["chip_offset"]))
 	src_panel.add_child(src_v)
+	# Task 96 — chip label on the left, a per-cell ▶ Run button on the right, so
+	# every source cell can be executed individually.
+	var src_header := HBoxContainer.new()
+	src_header.add_theme_constant_override("separation", 8)
+	src_v.add_child(src_header)
 	var src_kind_lbl := Label.new()
 	src_kind_lbl.text = "▸ " + block["kind"]
 	src_kind_lbl.add_theme_color_override("font_color", _color_scheme["src_chip"])
 	src_kind_lbl.add_theme_font_size_override("font_size", int(_density["chip_size"]))
-	src_v.add_child(src_kind_lbl)
+	src_header.add_child(src_kind_lbl)
+	# Per-cell Run button, kept next to the chip (left-aligned) so it's always
+	# visible regardless of the reading column's width.
+	var run_btn := Button.new()
+	run_btn.text = "▶ Run"
+	run_btn.tooltip_text = "Run this cell"
+	run_btn.focus_mode = Control.FOCUS_NONE
+	run_btn.add_theme_font_size_override("font_size", int(_density["chip_size"]))
+	var bstart := int(block["start"])
+	run_btn.pressed.connect(func(): _run_one(bstart))
+	src_header.add_child(run_btn)
+	var hspacer := Control.new()
+	hspacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hspacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	src_header.add_child(hspacer)
 	var src_text := RichTextLabel.new()
 	src_text.bbcode_enabled = false
 	src_text.fit_content = true
@@ -1171,16 +1229,36 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	src_v.add_child(src_text)
 	_rendered_box.add_child(src_panel)
 
-	# Result / plot below the source block.
+	# Task 99 — plot rendered INLINE as a framed result cell directly beneath
+	# the cas-plot source block, styled + coloured to match the notebook theme.
 	if block["kind"] == NotebookRunner.KIND_PLOT \
 			and _plot_samples_by_line.has(int(block["start"])):
 		var ys: PackedFloat64Array = _plot_samples_by_line[int(block["start"])]
+		var plot_cell := PanelContainer.new()
+		plot_cell.add_theme_stylebox_override("panel",
+			_make_cell_box(_color_scheme["res_bg"], _color_scheme["res_border"]))
+		var pv := VBoxContainer.new()
+		pv.add_theme_constant_override("separation", int(_density["chip_offset"]))
+		plot_cell.add_child(pv)
+		var plot_chip := Label.new()
+		plot_chip.text = "= plot   %s   (%d samples · x ∈ [%d, %d])" % [
+			block["body"].strip_edges(), ys.size(), int(X_MIN), int(X_MAX)]
+		plot_chip.add_theme_color_override("font_color", _color_scheme["res_chip"])
+		plot_chip.add_theme_font_size_override("font_size", int(_density["chip_size"]))
+		pv.add_child(plot_chip)
 		var plot_panel := preload("res://scripts/plot_panel.gd").new()
-		plot_panel.custom_minimum_size = Vector2(0, 220)
+		plot_panel.custom_minimum_size = Vector2(0, 260)
 		plot_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_rendered_box.add_child(plot_panel)
+		if plot_panel.has_method("set_theme_colors"):
+			plot_panel.set_theme_colors(
+				_color_scheme["src_bg"],                                   # plot bg
+				_color_scheme["muted"],                                    # axes
+				_color_scheme["muted"].lerp(_color_scheme["src_bg"], 0.6), # grid
+				_color_scheme["src_border"])                               # curve
+		pv.add_child(plot_panel)
 		if plot_panel.has_method("set_samples"):
 			plot_panel.set_samples(X_MIN, X_MAX, ys)
+		_rendered_box.add_child(plot_cell)
 		return
 
 	if paired_result == null:
@@ -1249,6 +1327,80 @@ func _attach_cell_context_menu(panel: PanelContainer, body: String, kind: String
 ## One StyleBoxFlat for a cell — colour / padding / corner radius / border
 ## thickness pull from the active scheme + density. Shadow is conditional on
 ## the user's checkbox.
+## Task 94 — a MATLAB-style docked-panel title bar (grey strip + a thin bottom
+## border). Returns [PanelContainer, Label]; both are recoloured per active
+## scheme by _apply_chrome_colors().
+func _make_title_bar(text: String) -> Array:
+	var bar := PanelContainer.new()
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.add_theme_font_size_override("font_size", 26)   # task 96 — doubled
+	bar.add_child(lbl)
+	return [bar, lbl]
+
+
+## Task 94 — derive a "chrome" (title-bar / status) fill from the scheme's
+## background: a touch darker for light schemes, a touch lighter for dark ones.
+func _chrome_fill() -> Color:
+	var bg: Color = _color_scheme["bg"]
+	return bg.darkened(0.10) if bg.get_luminance() > 0.5 else bg.lightened(0.12)
+
+
+func _style_title_bar(bar: PanelContainer, lbl: Label) -> void:
+	if bar == null:
+		return
+	var box := StyleBoxFlat.new()
+	box.bg_color = _chrome_fill()
+	box.content_margin_left = 8
+	box.content_margin_right = 8
+	box.content_margin_top = 4
+	box.content_margin_bottom = 4
+	box.border_width_bottom = 1
+	box.border_color = _color_scheme["muted"]
+	bar.add_theme_stylebox_override("panel", box)
+	if lbl:
+		lbl.add_theme_color_override("font_color", _color_scheme["text"])
+
+
+## Task 94 — recolour every chrome element (title bars, sidebar tree, path /
+## status labels, status strip) so the notebook view is cohesive with the
+## active scheme — light & MATLAB-like by default, but correct for dark
+## schemes too.
+func _apply_chrome_colors() -> void:
+	_style_title_bar(_sidebar_title_bar, _sidebar_title_lbl)
+	_style_title_bar(_editor_title_bar, _editor_title_lbl)
+	# Sidebar tree — white/dark panel matching the scheme, scheme-tinted select.
+	if _sidebar_tree:
+		var tree_box := StyleBoxFlat.new()
+		tree_box.bg_color = _color_scheme["src_bg"]
+		tree_box.set_content_margin_all(4)
+		tree_box.set_border_width_all(1)
+		tree_box.border_color = _color_scheme["muted"]
+		_sidebar_tree.add_theme_stylebox_override("panel", tree_box)
+		var sel := StyleBoxFlat.new()
+		sel.bg_color = _color_scheme["src_border"].lerp(_color_scheme["bg"], 0.6)
+		_sidebar_tree.add_theme_stylebox_override("selected", sel)
+		_sidebar_tree.add_theme_stylebox_override("selected_focus", sel)
+		_sidebar_tree.add_theme_color_override("font_color", _color_scheme["text"])
+		_sidebar_tree.add_theme_color_override("font_selected_color", _color_scheme["text"])
+	# Path + status labels.
+	if _path_label:
+		_path_label.add_theme_color_override("font_color", _color_scheme["text"])
+	if _status:
+		_status.add_theme_color_override("font_color", _color_scheme["muted"])
+	# Status strip at the bottom — a thin MATLAB-style bar.
+	if _status_bar:
+		var sbar := StyleBoxFlat.new()
+		sbar.bg_color = _chrome_fill()
+		sbar.content_margin_left = 8
+		sbar.content_margin_right = 8
+		sbar.content_margin_top = 3
+		sbar.content_margin_bottom = 3
+		sbar.border_width_top = 1
+		sbar.border_color = _color_scheme["muted"]
+		_status_bar.add_theme_stylebox_override("panel", sbar)
+
+
 func _make_cell_box(bg: Color, border: Color) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg

@@ -5,7 +5,8 @@ extends RefCounted
 ## reloaded on the next launch.
 
 const PATH := "user://color.cfg"
-const DEFAULT_KEY := "dark"
+# Task 94 — the app now ships looking like MATLAB by default.
+const DEFAULT_KEY := "matlab"
 
 # Each scheme is a Dictionary with the slots the notebook cell builders need.
 # Keys (with which control uses them):
@@ -94,6 +95,22 @@ const SCHEMES := {
 		"text":        Color.WHITE,
 		"muted":       Color(0.85, 0.85, 0.85),
 	},
+	# Task 94 — MATLAB look. Light grey desktop, white editor/command panels,
+	# MATLAB blue (#0072BD) on source/command cells and MATLAB orange (#D95319)
+	# on result cells — the two signature accent colours from MATLAB's default
+	# plot palette. Near-black text on white, mid-grey captions.
+	"matlab": {
+		"label": "MATLAB",
+		"bg":          Color(0.941, 0.941, 0.941),   # #F0F0F0 desktop grey
+		"src_bg":      Color(1.000, 1.000, 1.000),   # white command/editor panel
+		"src_border":  Color(0.000, 0.447, 0.741),   # #0072BD MATLAB blue
+		"src_chip":    Color(0.000, 0.447, 0.741),
+		"res_bg":      Color(0.976, 0.976, 0.976),   # #F9F9F9 faint grey result panel
+		"res_border":  Color(0.851, 0.325, 0.098),   # #D95319 MATLAB orange
+		"res_chip":    Color(0.851, 0.325, 0.098),
+		"text":        Color(0.102, 0.102, 0.102),   # #1A1A1A near-black
+		"muted":       Color(0.435, 0.435, 0.435),   # #6F6F6F caption grey
+	},
 }
 
 
@@ -116,7 +133,7 @@ static func scheme(key: String) -> Dictionary:
 
 
 static func ordered_keys() -> Array:
-	return ["dark", "light", "solarized_dark", "solarized_light",
+	return ["matlab", "dark", "light", "solarized_dark", "solarized_light",
 		"colorblind", "high_contrast"]
 
 

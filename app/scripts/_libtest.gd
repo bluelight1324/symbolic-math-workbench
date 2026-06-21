@@ -4,7 +4,7 @@ extends Node
 ## non-error, non-empty result (plots are checked for ≥10 finite samples),
 ## writes a Markdown report, and quits.
 
-const REPORT_PATH := "i:/readtgodot/task11_test_report.md"
+const REPORT_PATH := "i:/mathdot/task11_test_report.md"
 
 var _items: Array = []        # flat: each entry = {cat, label, input, cmd, kind}
 var _id_to_idx: Dictionary = {}

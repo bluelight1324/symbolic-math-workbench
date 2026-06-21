@@ -41,7 +41,7 @@ func _engine_exe_path() -> String:
 	var exe_dir := OS.get_executable_path().get_base_dir()
 	var candidates := [
 		exe_dir.path_join("reduce/lib/csl/reduce.exe"),
-		"i:/readtgodot/tools/reduce/lib/csl/reduce.exe",
+		"i:/mathdot/tools/reduce/lib/csl/reduce.exe",
 	]
 	for c in candidates:
 		if FileAccess.file_exists(c):

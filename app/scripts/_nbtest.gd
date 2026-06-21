@@ -4,10 +4,10 @@ extends Node
 ## and HTML export. UI-free (no NotebookView), marker-file logging so we can
 ## see progress even if stdout is buffered.
 
-const SAMPLE := "i:/readtgodot/app/notebooks_sample/algebra.md"
-const CALC := "i:/readtgodot/app/notebooks_sample/calculus.md"
-const MARKER := "i:/readtgodot/nbtest_marker.txt"
-const REPORT := "i:/readtgodot/task19_test_report.md"
+const SAMPLE := "i:/mathdot/app/notebooks_sample/algebra.md"
+const CALC := "i:/mathdot/app/notebooks_sample/calculus.md"
+const MARKER := "i:/mathdot/nbtest_marker.txt"
+const REPORT := "i:/mathdot/task19_test_report.md"
 
 var _results_by_id: Dictionary = {}   # engine id -> {output, is_error}
 

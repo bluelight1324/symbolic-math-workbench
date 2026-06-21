@@ -18,6 +18,17 @@ func set_samples(x_min: float, x_max: float, ys: PackedFloat64Array) -> void:
 	queue_redraw()
 
 
+## Task 99 — let the inline notebook plot adopt the active colour scheme so it
+## reads as part of the notebook (e.g. light background + MATLAB-blue curve)
+## instead of a fixed dark panel.
+func set_theme_colors(bg: Color, axis: Color, grid: Color, curve: Color) -> void:
+	_bg = bg
+	_axis_color = axis
+	_grid_color = grid
+	_curve_color = curve
+	queue_redraw()
+
+
 func clear_plot() -> void:
 	_samples = PackedFloat64Array()
 	queue_redraw()

@@ -50,6 +50,18 @@ const LOOKS := {
 		"shadows": true,
 		"animations": true,
 	},
+	# Task 94 — resemble the MATLAB desktop: light MATLAB palette, tight
+	# (compact) square-ish panels, a monospace command/editor font, and a flat
+	# finish (no drop-shadows, no fade animations) like MATLAB's chrome.
+	"matlab": {
+		"label": "MATLAB",
+		"color": "matlab",
+		"density": "compact",
+		"font_family": "matlab",
+		"font_size": 32,
+		"shadows": false,
+		"animations": false,
+	},
 	"brutalist": {
 		"label": "Brutalist",
 		"color": "high_contrast",
@@ -63,7 +75,7 @@ const LOOKS := {
 
 
 static func ordered_keys() -> Array:
-	return ["default", "notebook", "lab", "lecture", "mathematica", "brutalist"]
+	return ["matlab", "default", "notebook", "lab", "lecture", "mathematica", "brutalist"]
 
 
 static func get_look(key: String) -> Dictionary:

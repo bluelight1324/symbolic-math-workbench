@@ -12,20 +12,29 @@ const AdvancedViewScript := preload("res://scripts/advanced_view.gd")
 const PackageSettingsScript := preload("res://scripts/package_settings.gd")
 
 # --- design tokens (typography & spacing) ---
-const COL_BG := Color(0.08, 0.09, 0.11)
-const COL_PANEL := Color(0.13, 0.14, 0.17)
-const COL_ACCENT := Color(0.20, 0.55, 0.95)
-const COL_TEXT := Color(0.90, 0.92, 0.95)
-const COL_ERR := Color(0.95, 0.45, 0.45)
+# Task 94 — MATLAB-style light chrome: a light-grey desktop, white content
+# panels with thin grey borders and grey docked-panel title bars, MATLAB blue
+# (#0072BD) accents, near-black text, and nearly-square corners.
+const COL_BG := Color(0.941, 0.941, 0.941)      # #F0F0F0 MATLAB desktop grey
+const COL_PANEL := Color(1.0, 1.0, 1.0)         # white content panels
+const COL_ACCENT := Color(0.0, 0.447, 0.741)    # #0072BD MATLAB blue
+const COL_TEXT := Color(0.106, 0.106, 0.106)    # #1B1B1B near-black
+const COL_ERR := Color(0.75, 0.0, 0.0)          # MATLAB error red
+const COL_BORDER := Color(0.741, 0.741, 0.741)  # #BDBDBD panel border
+const COL_TITLE_BG := Color(0.886, 0.886, 0.886)   # #E2E2E2 docked-panel title bar
+const COL_TITLE_TEXT := Color(0.20, 0.20, 0.20)
+const COL_SELECT := Color(0.800, 0.894, 0.969)  # #CCE4F7 MATLAB selection blue
 const PAD := 16
-const RADIUS := 10
+const RADIUS := 3
 # Larger type & taller buttons across the whole UI (task 9).
-const FONT_BASE := 20
-const FONT_TITLE := 28
-const FONT_RESULT := 22
-const BUTTON_MIN_H := 48
-const INPUT_MIN_H := 56
-const KEYPAD_MIN_H := 56
+# Task 96 — font sizes doubled at startup (was 20 / 28 / 22); control heights
+# scaled up to fit the larger glyphs without clipping.
+const FONT_BASE := 40
+const FONT_TITLE := 56
+const FONT_RESULT := 44
+const BUTTON_MIN_H := 76
+const INPUT_MIN_H := 88
+const KEYPAD_MIN_H := 88
 
 var _input: LineEdit
 var _status: Label
@@ -88,7 +97,7 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	if "--capture" in args:
 		var p := args.find("--capture")
-		var out := "i:/readtgodot/app_screenshot_capture.png"
+		var out := "i:/mathdot/app_screenshot_capture.png"
 		if p + 1 < args.size():
 			out = args[p + 1]
 		# Longer delay when running the showcase / groebner demo, so the
@@ -120,6 +129,10 @@ func _ready() -> void:
 			var nb_btn := _icon_menubar.add_category(
 				"☰", "Notebook", notebook_popup, Color(0.55, 0.65, 0.95))
 			_icon_menubar.move_child(nb_btn, 0)
+		# Task 96 — a "Run All" action button at the far RIGHT of the toolbar,
+		# next to the other buttons; runs every cell in the open notebook.
+		_icon_menubar.add_action(
+			"▶", "Run All", _run_all_notebook, Color(0.40, 0.80, 0.55))
 	# Reserve room at the top for the IconMenuBar toolbar — the notebook view
 	# is now the default opening pane (replacing the calculator's middle area),
 	# but the toolbar above must stay visible and unchanged.
@@ -151,6 +164,10 @@ func _ready() -> void:
 	if "--ui-test" in args or OS.get_cmdline_args().has("--ui-test"):
 		var t := preload("res://scripts/_uitest.gd").new()
 		add_child(t)
+	# Task 95 — thorough math-function test driven through the UI.
+	if "--math-test" in args or OS.get_cmdline_args().has("--math-test"):
+		var mt := preload("res://scripts/_mathtest.gd").new()
+		add_child(mt)
 	if "--advanced" in args or OS.get_cmdline_args().has("--advanced"):
 		_toggle_advanced.call_deferred()
 	if "--packages" in args or OS.get_cmdline_args().has("--packages"):
@@ -216,7 +233,7 @@ func _open_notebook() -> void:
 	if _notebook and not _notebook.visible:
 		_toggle_notebook()
 	# Auto-open algebra.md so a screenshot shows real content.
-	var sample := "i:/readtgodot/app/notebooks_sample/algebra.md"
+	var sample := "i:/mathdot/app/notebooks_sample/algebra.md"
 	if FileAccess.file_exists(sample):
 		_notebook._open_file_at(sample)
 
@@ -251,7 +268,7 @@ func _open_task37_and_run() -> void:
 		return
 	if not _notebook.visible:
 		_toggle_notebook()
-	var path := "i:/readtgodot/app/notebooks_sample/task37_system.md"
+	var path := "i:/mathdot/app/notebooks_sample/task37_system.md"
 	if not FileAccess.file_exists(path):
 		return
 	_notebook._open_file_at(path)
@@ -264,7 +281,7 @@ func _open_plot_notebook_and_run() -> void:
 		return
 	if not _notebook.visible:
 		_toggle_notebook()
-	var path := "i:/readtgodot/app/notebooks_sample/plotting.md"
+	var path := "i:/mathdot/app/notebooks_sample/plotting.md"
 	if not FileAccess.file_exists(path):
 		return
 	_notebook._open_file_at(path)
@@ -277,7 +294,7 @@ func _open_showcase_and_run() -> void:
 		return
 	if not _notebook.visible:
 		_toggle_notebook()
-	var path := "i:/readtgodot/app/notebooks_sample/showcase.md"
+	var path := "i:/mathdot/app/notebooks_sample/showcase.md"
 	if not FileAccess.file_exists(path):
 		return
 	_notebook._open_file_at(path)
@@ -374,7 +391,7 @@ func _run_menu_demo() -> void:
 	if _menu_demo_done:
 		return
 	_menu_demo_done = true
-	_save_screenshot_after(3.0, "i:/readtgodot/app_screenshot_task11.png")
+	_save_screenshot_after(3.0, "i:/mathdot/app_screenshot_task11.png")
 	# Pick one item from several different categories.
 	const PICKS := [
 		["Algebra", 3],     # Factor x^6 - 1
@@ -478,16 +495,20 @@ func _build_ui() -> void:
 	split.split_offset = 480
 	root.add_child(split)
 
+	# Task 94 — MATLAB "Command History" docked panel.
 	var left := VBoxContainer.new()
 	left.custom_minimum_size = Vector2(380, 0)
 	split.add_child(left)
-	var hlabel := Label.new()
-	hlabel.text = "History (click an input to reuse it)"
-	left.add_child(hlabel)
+	var hist_body := _titled_panel(left, "Command History")
+	var hist_hint := Label.new()
+	hist_hint.text = "click an input to reuse it"
+	hist_hint.add_theme_color_override("font_color", COL_TITLE_TEXT)
+	hist_hint.add_theme_font_size_override("font_size", 24)
+	hist_body.add_child(hist_hint)
 	_history_scroll = ScrollContainer.new()
 	_history_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_history_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	left.add_child(_history_scroll)
+	hist_body.add_child(_history_scroll)
 	_history_box = VBoxContainer.new()
 	_history_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_history_box.add_theme_constant_override("separation", 8)
@@ -506,15 +527,8 @@ func _build_ui() -> void:
 	right_split.split_offset = 200
 	right.add_child(right_split)
 
-	# --- top: Code pane ---
-	var code_box := VBoxContainer.new()
-	code_box.add_theme_constant_override("separation", 4)
-	code_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right_split.add_child(code_box)
-	var code_label := Label.new()
-	code_label.text = "Code  (engine command for the last operation)"
-	code_label.add_theme_color_override("font_color", Color(0.6, 0.65, 0.7))
-	code_box.add_child(code_label)
+	# --- top: Command Window pane (the engine command for the last op) ---
+	var code_body := _titled_panel(right_split, "Command Window")
 	_code_view = CodeEdit.new()
 	_code_view.editable = false
 	_code_view.scroll_smooth = true
@@ -524,18 +538,10 @@ func _build_ui() -> void:
 	_code_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_code_view.custom_minimum_size = Vector2(0, 120)
 	_code_view.add_theme_font_size_override("font_size", FONT_RESULT)
-	code_box.add_child(_code_view)
+	code_body.add_child(_code_view)
 
 	# --- bottom: Result + Plot pane ---
-	var result_box := VBoxContainer.new()
-	result_box.add_theme_constant_override("separation", 4)
-	result_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right_split.add_child(result_box)
-
-	var result_label := Label.new()
-	result_label.text = "Result"
-	result_label.add_theme_color_override("font_color", Color(0.6, 0.65, 0.7))
-	result_box.add_child(result_label)
+	var result_body := _titled_panel(right_split, "Result")
 	_result_view = RichTextLabel.new()
 	_result_view.bbcode_enabled = false
 	_result_view.fit_content = true
@@ -544,19 +550,20 @@ func _build_ui() -> void:
 	_result_view.custom_minimum_size = Vector2(0, 80)
 	_result_view.add_theme_font_size_override("normal_font_size", FONT_RESULT)
 	_result_view.text = ""
-	result_box.add_child(_result_view)
+	result_body.add_child(_result_view)
 
 	var plot_label := Label.new()
 	plot_label.text = "Plot  (x ∈ [%d, %d])" % [int(X_MIN), int(X_MAX)]
-	plot_label.add_theme_color_override("font_color", Color(0.6, 0.65, 0.7))
-	result_box.add_child(plot_label)
+	plot_label.add_theme_color_override("font_color", COL_TITLE_TEXT)
+	plot_label.add_theme_font_size_override("font_size", 24)
+	result_body.add_child(plot_label)
 	_param_box = VBoxContainer.new()
-	result_box.add_child(_param_box)
+	result_body.add_child(_param_box)
 	_plot = PlotPanel.new()
 	_plot.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_plot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_plot.custom_minimum_size = Vector2(360, 200)
-	result_box.add_child(_plot)
+	result_body.add_child(_plot)
 
 	# Keypad
 	var keypad := GridContainer.new()
@@ -566,7 +573,7 @@ func _build_ui() -> void:
 	for tok in ["7", "8", "9", "^", "(", ")", "pi", "sqrt(", "df("]:
 		var kb := Button.new()
 		kb.text = tok
-		kb.custom_minimum_size = Vector2(64, KEYPAD_MIN_H)
+		kb.custom_minimum_size = Vector2(104, KEYPAD_MIN_H)
 		kb.pressed.connect(func(): _insert_token(tok))
 		keypad.add_child(kb)
 	root.add_child(keypad)
@@ -655,9 +662,19 @@ func _toggle_notebook() -> void:
 		# Auto-open the bundled sample workspace on first switch.
 		var sample := OS.get_executable_path().get_base_dir().path_join("notebooks_sample")
 		if not DirAccess.dir_exists_absolute(sample):
-			sample = "i:/readtgodot/app/notebooks_sample"   # dev fallback
+			sample = "i:/mathdot/app/notebooks_sample"   # dev fallback
 		if DirAccess.dir_exists_absolute(sample):
 			_notebook.open_workspace(sample)
+
+
+## Task 96 — "Run All" toolbar button: make the notebook visible and run every
+## cell in the open file.
+func _run_all_notebook() -> void:
+	if _notebook == null:
+		return
+	if not _notebook.visible:
+		_toggle_notebook()
+	_notebook._on_run()
 
 
 func _toggle_advanced() -> void:
@@ -754,6 +771,13 @@ func _on_problem_selected(cat_idx: int, item_idx: int) -> void:
 
 func _make_theme() -> Theme:
 	var t := Theme.new()
+	# Task 97 — use MATLAB's font (Courier New, else Verdana) across the whole
+	# calculator chrome too. SystemFont keeps OS glyph-fallback on, so the
+	# toolbar's special icon glyphs still render even though Courier New lacks
+	# them.
+	var matlab_font := FontConfig.font_resource("matlab")
+	if matlab_font:
+		t.default_font = matlab_font
 	# Larger default font size everywhere (task 9).
 	t.default_font_size = FONT_BASE
 	t.set_font_size("font_size", "Label", FONT_BASE)
@@ -762,29 +786,149 @@ func _make_theme() -> Theme:
 	t.set_font_size("normal_font_size", "RichTextLabel", FONT_RESULT)
 	t.set_font_size("font_size", "PopupMenu", FONT_BASE)
 	t.set_font_size("font_size", "MenuBar", FONT_BASE)
+	t.set_font_size("font_size", "Tree", FONT_BASE)
 
-	var panel := StyleBoxFlat.new()
-	panel.bg_color = COL_PANEL
-	panel.set_corner_radius_all(RADIUS)
-	panel.set_content_margin_all(12)
-	t.set_stylebox("normal", "LineEdit", panel)
+	# LineEdit — white field with a thin grey border, MATLAB blue focus ring.
+	var le := StyleBoxFlat.new()
+	le.bg_color = COL_PANEL
+	le.set_corner_radius_all(RADIUS)
+	le.set_content_margin_all(10)
+	le.set_border_width_all(1)
+	le.border_color = COL_BORDER
+	t.set_stylebox("normal", "LineEdit", le)
+	var le_focus := le.duplicate()
+	le_focus.border_color = COL_ACCENT
+	t.set_stylebox("focus", "LineEdit", le_focus)
 
+	# Button — MATLAB toolstrip style: flat light-grey face, thin border,
+	# light-blue hover/press with a blue border. Square-ish corners.
 	var btn := StyleBoxFlat.new()
-	btn.bg_color = COL_ACCENT.darkened(0.1)
+	btn.bg_color = COL_TITLE_BG
 	btn.set_corner_radius_all(RADIUS)
-	btn.content_margin_left = 18
-	btn.content_margin_right = 18
-	btn.content_margin_top = 10
-	btn.content_margin_bottom = 10
+	btn.content_margin_left = 16
+	btn.content_margin_right = 16
+	btn.content_margin_top = 9
+	btn.content_margin_bottom = 9
+	btn.set_border_width_all(1)
+	btn.border_color = COL_BORDER
 	t.set_stylebox("normal", "Button", btn)
 	var btn_hover := btn.duplicate()
-	btn_hover.bg_color = COL_ACCENT
+	btn_hover.bg_color = COL_SELECT
+	btn_hover.border_color = COL_ACCENT
 	t.set_stylebox("hover", "Button", btn_hover)
+	var btn_pressed := btn.duplicate()
+	btn_pressed.bg_color = COL_SELECT.darkened(0.08)
+	btn_pressed.border_color = COL_ACCENT
+	t.set_stylebox("pressed", "Button", btn_pressed)
+
+	# Tree (sidebar / file tree) — white panel, MATLAB-blue selection.
+	var tree_bg := StyleBoxFlat.new()
+	tree_bg.bg_color = COL_PANEL
+	tree_bg.set_corner_radius_all(RADIUS)
+	tree_bg.set_content_margin_all(4)
+	tree_bg.set_border_width_all(1)
+	tree_bg.border_color = COL_BORDER
+	t.set_stylebox("panel", "Tree", tree_bg)
+	var sel := StyleBoxFlat.new()
+	sel.bg_color = COL_SELECT
+	sel.set_corner_radius_all(2)
+	t.set_stylebox("selected", "Tree", sel)
+	t.set_stylebox("selected_focus", "Tree", sel)
+	t.set_color("font_color", "Tree", COL_TEXT)
+	t.set_color("font_selected_color", "Tree", COL_TEXT)
+
+	# CodeEdit / TextEdit (Command Window + source editor) — white field, thin
+	# grey border, dark text + caret, so it reads like MATLAB's command window.
+	var code_bg := StyleBoxFlat.new()
+	code_bg.bg_color = COL_PANEL
+	code_bg.set_corner_radius_all(RADIUS)
+	code_bg.set_content_margin_all(8)
+	code_bg.set_border_width_all(1)
+	code_bg.border_color = COL_BORDER
+	for tt in ["TextEdit", "CodeEdit"]:
+		t.set_stylebox("normal", tt, code_bg)
+		t.set_stylebox("focus", tt, code_bg)
+		# Read-only views (e.g. the Command Window) use their own stylebox —
+		# theme it too or it falls back to a grey default.
+		t.set_stylebox("read_only", tt, code_bg)
+		t.set_color("font_color", tt, COL_TEXT)
+		t.set_color("font_readonly_color", tt, COL_TEXT)
+		t.set_color("caret_color", tt, COL_TEXT)
+		t.set_color("current_line_color", tt, COL_SELECT * Color(1, 1, 1, 0.35))
+		t.set_color("selection_color", tt, COL_SELECT)
+
+	# PopupMenu — light surface, dark text, light-blue hover.
+	var pop_bg := StyleBoxFlat.new()
+	pop_bg.bg_color = COL_PANEL
+	pop_bg.set_corner_radius_all(RADIUS)
+	pop_bg.set_content_margin_all(6)
+	pop_bg.set_border_width_all(1)
+	pop_bg.border_color = COL_BORDER
+	t.set_stylebox("panel", "PopupMenu", pop_bg)
+	var pop_hover := StyleBoxFlat.new()
+	pop_hover.bg_color = COL_SELECT
+	pop_hover.set_corner_radius_all(2)
+	t.set_stylebox("hover", "PopupMenu", pop_hover)
+	t.set_color("font_color", "PopupMenu", COL_TEXT)
+	t.set_color("font_hover_color", "PopupMenu", COL_TEXT)
 
 	t.set_color("font_color", "Label", COL_TEXT)
 	t.set_color("font_color", "Button", COL_TEXT)
 	t.set_color("font_color", "LineEdit", COL_TEXT)
 	return t
+
+
+## Task 94 — MATLAB-style docked panel: a white card with a thin grey border
+## and a grey title-bar strip across the top. Returns the inner body
+## VBoxContainer to fill with content. Mirrors MATLAB's "Current Folder /
+## Command Window / Workspace" docked panels.
+func _titled_panel(parent: Control, title: String) -> VBoxContainer:
+	var card := PanelContainer.new()
+	var card_box := StyleBoxFlat.new()
+	card_box.bg_color = COL_PANEL
+	card_box.set_corner_radius_all(RADIUS)
+	card_box.set_border_width_all(1)
+	card_box.border_color = COL_BORDER
+	card.add_theme_stylebox_override("panel", card_box)
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	parent.add_child(card)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 0)
+	card.add_child(col)
+
+	# Title bar.
+	var bar := PanelContainer.new()
+	var bar_box := StyleBoxFlat.new()
+	bar_box.bg_color = COL_TITLE_BG
+	bar_box.corner_radius_top_left = RADIUS
+	bar_box.corner_radius_top_right = RADIUS
+	bar_box.content_margin_left = 8
+	bar_box.content_margin_right = 8
+	bar_box.content_margin_top = 4
+	bar_box.content_margin_bottom = 4
+	bar_box.border_width_bottom = 1
+	bar_box.border_color = COL_BORDER
+	bar.add_theme_stylebox_override("panel", bar_box)
+	col.add_child(bar)
+	var title_lbl := Label.new()
+	title_lbl.text = title
+	title_lbl.add_theme_color_override("font_color", COL_TITLE_TEXT)
+	title_lbl.add_theme_font_size_override("font_size", 26)
+	bar.add_child(title_lbl)
+
+	# Body.
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 6)
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var body_margin := MarginContainer.new()
+	for s in ["left", "top", "right", "bottom"]:
+		body_margin.add_theme_constant_override("margin_" + s, 8)
+	body_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body_margin.add_child(body)
+	col.add_child(body_margin)
+	return body
 
 
 # ----------------------------------------------------------------------------
@@ -905,9 +1049,13 @@ func _on_result_ready(id: int, output: String, is_error: bool) -> void:
 func _append_history(kind: String, expr: String, _cmd: String) -> RichTextLabel:
 	var panel := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = COL_PANEL
+	# Task 94 — faint grey row with a thin MATLAB-blue left accent, so entries
+	# read clearly on the white "Command History" card.
+	sb.bg_color = Color(0.965, 0.965, 0.965)
 	sb.set_corner_radius_all(RADIUS)
 	sb.set_content_margin_all(8)
+	sb.border_width_left = 3
+	sb.border_color = COL_ACCENT
 	panel.add_theme_stylebox_override("panel", sb)
 	var vb := VBoxContainer.new()
 	panel.add_child(vb)
@@ -917,7 +1065,8 @@ func _append_history(kind: String, expr: String, _cmd: String) -> RichTextLabel:
 	in_label.fit_content = true
 	in_label.scroll_active = false
 	in_label.meta_clicked.connect(func(_m): _input.text = expr; _input.grab_focus())
-	in_label.text = "[color=#7fb2ff][url]%s[/url][/color]  [color=#8a8f99](%s)[/color]" % [expr, kind]
+	# MATLAB blue link on the light row; grey kind caption.
+	in_label.text = "[color=#0072bd][url]%s[/url][/color]  [color=#6f6f6f](%s)[/color]" % [expr, kind]
 	vb.add_child(in_label)
 
 	var out_label := RichTextLabel.new()
