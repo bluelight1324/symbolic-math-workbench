@@ -108,3 +108,31 @@ does the installer work.
 104. create a notebook file to solv a difficult integral equation, and load it in the app. do 1 doc later.
 105. do not add your commentary or the solution. what can it do on its own. show another difficult integral equation. do 1 doc
 106. push to github and do 1 doc.
+107. on the left side pane the the filenames are not visible on mouse hover,see 
+screenshot. do 1 doc
+108. On selecting new notebbok,it shows a prefilled cel, along with some unwanted symbols on top. Also tghe notebookk is not editable. see screenshot. do 1 doc.
+109.Why is the notebook not editable.Do 1 Doc.
+110. how can u improve the above. do 1 doc.
+111.how can u improve on the above.some more. do 1 doc.
+112  do not make changes unless asked to. add to claude.md. do 1 doc.
+113. start app. and do 1 doc.
+114. run buuton in cells does not work.Run notebook also does not work. check and fix and do 1 doc.
+115. The new show source and show notebook buttons will nt do. they have to be the same as te top buttons. do whatever u can to fix that and show 1 doc.
+116 is the factorize result correct. see screenshot and do 1 doc.
+117. whhy is there a %s on the page. .see previous screenshot,do 1 doc
+118. make the fonts bolder throuhout the app,except buttons. Also task 107 issue still exists. do 1 doc.
+119. update the installer. do 1 doc.
+120. how will it satisfy if the problem is in mathjax like this. Solve using mathdot:
+f(x)=\lambda\int_{-\infty}^{\infty}e^{-(x-t)^2}f(t)\,dt+\int_{0}^{x}(x-t)f(t)^3\,dt+\sin x
+121. How will it do a problem given in mathjax. can it be converted internally. do 1 doc 
+122.how to clear the notebook of answers so it can be runa again. do 1 doc.
+123 after installing the left hand tree shows a blank in the first row and, also mouse clcik causes it to be blank. see screenshot. do 1 doc.
+124. is there a mathjax to reduce open source converter readily available. do 1 doc
+125. what tasks need to be implemented. do 1 doc.
+126. implement all the remaining tasks and do not stop everything is done. do 1 doc.
+127. do a thorough test of what u have implemented and do 1 doc,
+128. create the installer and do 1 doc.
+129. make the buttons on top bigger, but not too big. make matlab courier new as the standard font on startup. create a matlab dark theme. Make the left pane  colored i.e
+colored file names. do 1 doc.
+130. is reduce cas also instaled with the installer. do 1 doc
+131. update github and do 1 doc

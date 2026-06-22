@@ -8,10 +8,12 @@ extends HBoxContainer
 ##
 ## (Task 23 — the menu bar "uses Godot" beyond a text-only widget.)
 
-const BTN_SIZE := Vector2(72, 64)
+# Task 129 — top buttons a bit bigger (was 72×64 / icon 28 / label 12), but not
+# so big they crowd the bar.
+const BTN_SIZE := Vector2(88, 78)
 const RADIUS := 10
-const FONT_SIZE_ICON := 28
-const FONT_SIZE_LABEL := 12
+const FONT_SIZE_ICON := 34
+const FONT_SIZE_LABEL := 14
 # Task 98 — bold the top-button glyphs. A same-colour outline thickens every
 # glyph (including the icon glyphs that come from OS fallback fonts, which a
 # bold weight alone may not affect).
@@ -21,6 +23,16 @@ const LABEL_OUTLINE := 2
 
 var _menus_by_button: Dictionary = {}      # Button -> PopupMenu
 var _bold_font: Font                       # lazily-built bold version of the app font
+var _glyphs_by_button: Dictionary = {}     # Button -> {icon: Label, text: Label}  (task 115)
+
+
+## Task 115 — update a button's icon glyph + label (used by the Source/Notebook
+## toggle button to show what clicking will do).
+func set_button_glyph(btn: Button, icon: String, label: String) -> void:
+	if _glyphs_by_button.has(btn):
+		_glyphs_by_button[btn]["icon"].text = icon
+		_glyphs_by_button[btn]["text"].text = label
+		btn.tooltip_text = label
 
 
 func _ready() -> void:
@@ -83,6 +95,7 @@ func _build_button(icon: String, label: String, accent: Color) -> Button:
 	btn.add_theme_stylebox_override("normal", base)
 	btn.add_theme_stylebox_override("hover", hover)
 	btn.add_theme_stylebox_override("pressed", pressed)
+	_glyphs_by_button[btn] = {"icon": icon_lbl, "text": text_lbl}   # task 115
 	# Plain text colours so the bg StyleBox is the only thing tinting.
 	# Task 98 — bolder font: a bold-weight face plus a same-colour outline so
 	# both the labels and the fallback-rendered icon glyphs read heavier.

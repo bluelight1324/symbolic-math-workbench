@@ -55,7 +55,14 @@ func _start() -> void:
 		_ready_ok = false
 		session_failed.emit("Math engine binary not found at %s" % exe)
 		return
-	var info := OS.execute_with_pipe(exe, ["-w"])
+	# Task 114 — give REDUCE a real heap (`-K 1000m`). The default `-w` heap is
+	# too small for the loaded packages: under memory pressure it fails with
+	# "+++ Fatal error insufficient freestore", and because that aborts the
+	# command the result sentinel never arrives — so evaluations silently hang
+	# (and a hung notebook run leaves _run_active stuck, breaking every later
+	# Run). 1000m is plenty for the package set and heavy integrals (erf etc.),
+	# and CSL only grows into it as needed.
+	var info := OS.execute_with_pipe(exe, ["-w", "-K", "1000m"])
 	if info.is_empty():
 		_ready_ok = false
 		session_failed.emit("Failed to launch math engine process")

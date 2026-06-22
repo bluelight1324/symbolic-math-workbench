@@ -3,7 +3,7 @@
 ; Supports Windows 7 SP1 and later
 
 #define MyAppName "mathdot"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.2"
 #define MyAppPublisher "bluelight1324"
 #define MyAppURL "https://github.com/bluelight1324/symbolic-math-workbench"
 #define MyAppExeName "Godot.exe"

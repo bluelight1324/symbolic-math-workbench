@@ -62,6 +62,16 @@ const LOOKS := {
 		"shadows": false,
 		"animations": false,
 	},
+	# Task 129 — the MATLAB desktop in its dark theme.
+	"matlab_dark": {
+		"label": "MATLAB Dark",
+		"color": "matlab_dark",
+		"density": "compact",
+		"font_family": "matlab",
+		"font_size": 32,
+		"shadows": false,
+		"animations": false,
+	},
 	"brutalist": {
 		"label": "Brutalist",
 		"color": "high_contrast",
@@ -75,7 +85,7 @@ const LOOKS := {
 
 
 static func ordered_keys() -> Array:
-	return ["matlab", "default", "notebook", "lab", "lecture", "mathematica", "brutalist"]
+	return ["matlab", "matlab_dark", "default", "notebook", "lab", "lecture", "mathematica", "brutalist"]
 
 
 static func get_look(key: String) -> Dictionary:

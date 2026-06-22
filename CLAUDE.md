@@ -1,5 +1,15 @@
 # Symbolic Math Workbench — Claude Code Guidelines
 
+## Scope of Changes
+
+**Do NOT make changes unless explicitly asked to.** Only modify code, files, or
+configuration that the current task explicitly requests. When a task asks a
+question ("why is X…", "will X…", "is X…"), answer it and write the doc — do
+**not** change code. When a task asks to investigate or explain, investigate and
+explain — do not "fix" things that weren't asked about. If you believe an
+additional change would help, propose it and wait for the user to ask, rather
+than making it pre-emptively.
+
 ## Git & GitHub
 
 **Do NOT push to GitHub unless explicitly requested by the user.** Commit work locally, but always ask for confirmation or wait for an explicit "update github" instruction before pushing.

@@ -1,5 +1,9 @@
 class_name NotebookView
 extends Control
+
+## Task 115 — emitted whenever the rendered/source view flips, so the top-bar
+## toggle button (owned by main.gd) can update its label.
+signal view_mode_changed(is_notebook_view: bool)
 ## File-backed notebook UI implementing P0–P2 from
 ## [task18_requirements.md](../task18_requirements.md).
 ##
@@ -28,6 +32,19 @@ extends Control
 ##     recognised and produce a placeholder result; full 3D viewport
 ##     deferred.
 
+## Task 129 — colour file names in the tree. Saturated hues chosen to read on
+## both the light and dark MATLAB backgrounds; each notebook keeps a stable
+## colour (hashed from its name), folders get a gold tint.
+const _TREE_FILE_COLORS := [
+	Color(0.00, 0.45, 0.85),   # blue
+	Color(0.85, 0.33, 0.10),   # orange
+	Color(0.20, 0.62, 0.28),   # green
+	Color(0.58, 0.32, 0.78),   # purple
+	Color(0.00, 0.58, 0.62),   # teal
+	Color(0.82, 0.22, 0.45),   # rose
+]
+const _TREE_DIR_COLOR := Color(0.78, 0.60, 0.12)   # gold for folders
+
 const COL_BG := Color(0.08, 0.09, 0.11)
 const COL_PANEL := Color(0.13, 0.14, 0.17)
 const PAD := 12
@@ -37,6 +54,8 @@ var _workspace_dir: String = ""
 var _open_file: String = ""
 
 var _sidebar_tree: Tree
+var _sidebar_col: VBoxContainer   # task 126 — toggled by distraction-free mode
+var _zen_on := false              # task 126 — distraction-free state
 var _editor: CodeEdit
 var _status: Label
 var _path_label: Label
@@ -60,7 +79,7 @@ var _new_name_input: LineEdit
 var _editor_container: Control
 var _rendered_scroll: ScrollContainer
 var _rendered_box: VBoxContainer
-var _view_mode_btn: Button
+# (task 115 — the view toggle moved to the top IconMenuBar; see main.gd)
 # Task 58: notebook view is the primary display. Source is opt-in via the
 # "Show Source" button. (Was `false` previously — see task 35 v2 doc.)
 var _is_notebook_view: bool = true
@@ -103,6 +122,9 @@ const _ID_RUN := 3
 const _ID_FORCE := 4
 const _ID_EXPORT := 5
 const _ID_VIEW := 6
+const _ID_CLEAR := 7       # Task 126 — clear all cas-result outputs
+const _ID_SEARCH := 8      # Task 126 — workspace search (req #13)
+const _ID_ZEN := 9         # Task 126 — distraction-free mode (req #20)
 const _ID_SHADOWS := 5000
 const _ID_ANIMATIONS := 5001
 const _ID_FONT_BASE := 1000
@@ -140,7 +162,7 @@ func _ready() -> void:
 	# Task 58 — load persisted font selection and apply it.
 	_font_size = FontConfig.load_size()
 	_font_family = FontConfig.load_family()
-	_font_resource = FontConfig.font_resource(_font_family)
+	_font_resource = _resolve_bold_font(_font_family)
 	if _font_size_spin:
 		_font_size_spin.value = _font_size
 	if _font_family_btn:
@@ -201,6 +223,10 @@ func _build_ui() -> void:
 	_path_label.text = "(no workspace open)"
 	_path_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	topbar.add_child(_path_label)
+	# Task 115 — the Source/Notebook toggle now lives in the TOP IconMenuBar as a
+	# proper category-style button (added by main.gd), matching the other top
+	# buttons. The notebook view just emits view_mode_changed so that button's
+	# label can follow the current mode.
 	# Task 66 — every previous action-bar widget (Open workspace, New note,
 	# Save, Run, Force re-run, Export HTML, Show Source, Font, Size, Theme,
 	# Style, Shadows, Animations) lives in one PopupMenu now.
@@ -217,6 +243,7 @@ func _build_ui() -> void:
 
 	# Task 94 — MATLAB "Current Folder" docked panel wrapping the file tree.
 	var sidebar_col := VBoxContainer.new()
+	_sidebar_col = sidebar_col   # task 126 — distraction-free toggles this column
 	sidebar_col.add_theme_constant_override("separation", 0)
 	sidebar_col.custom_minimum_size = Vector2(240, 0)
 	var sb_title := _make_title_bar("Current Folder")
@@ -339,6 +366,7 @@ func _refresh_tree() -> void:
 		return
 	var root := _sidebar_tree.create_item()
 	root.set_text(0, _workspace_dir.get_file() + "/")
+	root.set_custom_color(0, _TREE_DIR_COLOR)   # task 129 — coloured root folder
 	_populate_tree(_workspace_dir, root)
 
 
@@ -359,14 +387,22 @@ func _populate_tree(dir_path: String, parent: TreeItem) -> void:
 	entries.sort()
 	for name in entries:
 		var full := dir_path.path_join(name)
-		var item := _sidebar_tree.create_item(parent)
+		# Task 123 — create a row ONLY for a directory or a .md notebook. Creating
+		# the item before this check left non-notebook files (e.g. algebra.html)
+		# as a blank, metadata-less row that couldn't be opened on click.
 		if DirAccess.dir_exists_absolute(full):
+			var item := _sidebar_tree.create_item(parent)
 			item.set_text(0, name + "/")
 			item.set_metadata(0, {"kind": "dir", "path": full})
+			item.set_custom_color(0, _TREE_DIR_COLOR)   # task 129 — coloured folders
 			_populate_tree(full, item)
 		elif name.ends_with(".md"):
+			var item := _sidebar_tree.create_item(parent)
 			item.set_text(0, name)
 			item.set_metadata(0, {"kind": "file", "path": full})
+			# Task 129 — colour the notebook name (stable per filename).
+			item.set_custom_color(0,
+				_TREE_FILE_COLORS[abs(name.hash()) % _TREE_FILE_COLORS.size()])
 
 
 func _on_tree_item_activated() -> void:
@@ -446,10 +482,17 @@ func _on_new_note_confirmed() -> void:
 	if f == null:
 		_status.text = "Failed to create %s" % path
 		return
-	f.store_string("# %s\n\nWrite some prose, then a `cas` block:\n\n```cas\n(x+1)^2\n```\n")
+	# Task 108 — the title placeholder was never substituted, so new notes
+	# opened showing a literal "%s" heading. Use the note's name as the title.
+	var title := raw.get_basename()
+	f.store_string("# %s\n\nWrite some prose, then a `cas` block:\n\n```cas\n(x+1)^2\n```\n" % title)
 	f.close()
 	_refresh_tree()
 	_open_file_at(path)
+	# Task 108 — a brand-new note opens in editable Source mode (the rendered
+	# notebook view is read-only), so the user can type into it immediately.
+	_is_notebook_view = false
+	_apply_view_mode()
 
 
 # ============================================================================
@@ -552,7 +595,9 @@ func _dispatch_next_block() -> void:
 	var cmd: String
 	match src_kind:
 		NotebookRunner.KIND_CAS:
-			cmd = body
+			# Task 126 — accept LaTeX/MathJax in a cas block (no-op for plain
+			# REDUCE source, which has no backslash).
+			cmd = _latex_to_reduce(body)
 		NotebookRunner.KIND_TEST:
 			# Grammar: "assert: <lhs> = <rhs>"  →  evaluate the *difference*.
 			# REDUCE auto-simplifies, so an equivalent pair evaluates to 0.
@@ -578,15 +623,36 @@ func _dispatch_next_block() -> void:
 			cmd = "on rounded; for i:=0:%d collect sub(x=(%f)+(i+0.5)*(%f), %s); off rounded" % [
 				n, x_min, step, body]
 		NotebookRunner.KIND_PLOT3D:
-			# Stub for P2 #9: 3D viewport deferred. Report the request, but
-			# don't evaluate a heavy 2D sample for it (would be misleading).
-			_finish_block_locally(entry, "[3D plot deferred — request: %s]" % body, true)
+			# Task 126 (req #9) — real inline 3D surface. The mesh is built at
+			# render time from the block body (sampled with Godot's Expression
+			# evaluator); here we just record that it rendered.
+			_finish_block_locally(entry, "3D surface rendered inline (%s)" % body, true)
 			return
 		_:
 			_finish_block_locally(entry, "Unknown block kind: %s" % src_kind, false)
 			return
 	var id := MathEngine.evaluate(cmd)
 	_pending[id] = entry
+	_watch_block_timeout(id)
+
+
+## Task 114 — guard against a block whose evaluation never returns. A heavy
+## command (e.g. `int(exp(-x^2), x)`) can make REDUCE hit "insufficient
+## freestore", so the sentinel that ends the reply never arrives and the result
+## signal never fires. Without this the run would stay `_run_active = true`
+## forever — which makes EVERY later Run (cell or notebook) silently early-out
+## with "Already running". On timeout we abort the run, reset the state, and
+## restart the (stuck) engine so the app stays usable.
+func _watch_block_timeout(id: int) -> void:
+	await get_tree().create_timer(20.0).timeout
+	if not _run_active or not _pending.has(id):
+		return    # block completed normally (or run already aborted)
+	_pending.clear()
+	_run_queue.clear()
+	_run_results.clear()
+	_run_active = false
+	_status.text = "⚠ Run timed out — the engine was restarted. Press Run again."
+	MathEngine.restart()
 
 
 func _on_engine_result(id: int, output: String, is_error: bool) -> void:
@@ -710,6 +776,366 @@ func _on_export_html() -> void:
 	_status.text = "Exported → %s" % out_path
 
 
+# ============================================================================
+# Task 126 — remaining-feature implementations
+# ============================================================================
+
+## Clear every *-result block (cas-result, cas-test-result, cas-plot-result, …)
+## from the open notebook so the next Run recomputes from clean. Closes the
+## task-122 gap (Force re-run overwrote results; this empties them).
+func _on_clear_outputs() -> void:
+	if _open_file.is_empty():
+		_status.text = "No file open"
+		return
+	_editor.text = _strip_result_blocks(_editor.text)
+	_on_save()
+	if _is_notebook_view:
+		_rebuild_rendered_cells()
+	_status.text = "Cleared all outputs — Run to recompute"
+
+
+## Pure helper (testable) — remove every *-result fenced block from notebook text.
+func _strip_result_blocks(text: String) -> String:
+	var out := PackedStringArray()
+	var skipping := false
+	for line in text.split("\n"):
+		var s := line.strip_edges()
+		if not skipping and s.begins_with("```") \
+				and s.substr(3).strip_edges().ends_with("-result"):
+			skipping = true
+			continue                     # drop the opening fence
+		if skipping:
+			if s == "```":
+				skipping = false         # drop the closing fence and stop
+			continue
+		out.append(line)
+	return "\n".join(out)
+
+
+## Distraction-free mode (requirement #20) — hide the file-tree sidebar so the
+## editor/notebook gets the full width. Toggle again to restore.
+func _toggle_distraction_free() -> void:
+	_zen_on = not _zen_on
+	if _sidebar_col:
+		_sidebar_col.visible = not _zen_on
+	if _popup:
+		var i := _popup.get_item_index(_ID_ZEN)
+		if i >= 0:
+			_popup.set_item_checked(i, _zen_on)
+	_status.text = "Distraction-free: %s" % ("on" if _zen_on else "off")
+
+
+## Workspace search (requirement #13) — recursively grep every .md notebook in
+## the workspace for a substring and list matches; clicking a hit opens that
+## notebook at the matching line.
+var _search_dialog: AcceptDialog
+var _search_input: LineEdit
+var _search_results: ItemList
+var _search_hits: Array = []
+
+func _on_search_workspace() -> void:
+	if _workspace_dir.is_empty():
+		_status.text = "No workspace open"
+		return
+	if _search_dialog == null:
+		_search_dialog = AcceptDialog.new()
+		_search_dialog.title = "Search workspace"
+		_search_dialog.min_size = Vector2(560, 460)
+		var box := VBoxContainer.new()
+		box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_search_input = LineEdit.new()
+		_search_input.placeholder_text = "search text…"
+		_search_input.text_submitted.connect(func(_t): _run_workspace_search())
+		box.add_child(_search_input)
+		_search_results = ItemList.new()
+		_search_results.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_search_results.custom_minimum_size = Vector2(540, 380)
+		_search_results.item_activated.connect(_on_search_result_activated)
+		box.add_child(_search_results)
+		_search_dialog.add_child(box)
+		add_child(_search_dialog)
+	_search_input.text = ""
+	_search_results.clear()
+	_search_hits.clear()
+	_search_dialog.popup_centered()
+	_search_input.grab_focus()
+
+
+func _run_workspace_search() -> void:
+	var needle := _search_input.text.strip_edges()
+	_search_results.clear()
+	_search_hits.clear()
+	if needle.is_empty():
+		return
+	var files: Array = []
+	_collect_md_files(_workspace_dir, files)
+	var low := needle.to_lower()
+	for path in files:
+		var f := FileAccess.open(path, FileAccess.READ)
+		if f == null:
+			continue
+		var ln := 0
+		while not f.eof_reached():
+			var line := f.get_line()
+			ln += 1
+			if line.to_lower().find(low) != -1:
+				_search_hits.append({"path": path, "line": ln})
+				_search_results.add_item("%s:%d  %s" % [
+					path.get_file(), ln, line.strip_edges().left(60)])
+		f.close()
+	if _search_hits.is_empty():
+		_search_results.add_item("(no matches)")
+
+
+func _collect_md_files(dir_path: String, out: Array) -> void:
+	var d := DirAccess.open(dir_path)
+	if d == null:
+		return
+	d.list_dir_begin()
+	while true:
+		var name := d.get_next()
+		if name == "":
+			break
+		if name.begins_with("."):
+			continue
+		var full := dir_path.path_join(name)
+		if DirAccess.dir_exists_absolute(full):
+			_collect_md_files(full, out)
+		elif name.ends_with(".md"):
+			out.append(full)
+	d.list_dir_end()
+
+
+func _on_search_result_activated(idx: int) -> void:
+	if idx < 0 or idx >= _search_hits.size():
+		return
+	var hit: Dictionary = _search_hits[idx]
+	_open_file_at(hit["path"])
+	if not _is_notebook_view and _editor:
+		var l: int = int(hit["line"]) - 1
+		if l >= 0 and l < _editor.get_line_count():
+			_editor.set_caret_line(l)
+			_editor.center_viewport_to_caret()
+	_search_dialog.hide()
+
+
+## Wikilink click (requirement #12) — `[[Note]]` in prose opens Note.md from the
+## workspace (creating nothing; just navigates if it exists).
+func _on_prose_meta_clicked(meta) -> void:
+	var name := str(meta)
+	if not name.ends_with(".md"):
+		name += ".md"
+	var target := _workspace_dir.path_join(name)
+	if FileAccess.file_exists(target):
+		_open_file_at(target)
+		_status.text = "Opened %s" % name
+	else:
+		_status.text = "No such note: %s" % name
+
+
+## LaTeX → REDUCE input conversion (requirements from tasks 121/124). Translates
+## a useful subset of LaTeX/MathJax to REDUCE syntax so a `cas` block can be
+## written in LaTeX. No-op unless the source actually contains a backslash, so
+## existing plain-REDUCE blocks are never touched.
+func _latex_to_reduce(src: String) -> String:
+	# No-op unless the source actually looks like LaTeX. A backslash command OR a
+	# brace super/subscript (`^{` / `_{`, which REDUCE never writes) is the signal;
+	# plain REDUCE — including list syntax like {1,2,3} — is left untouched.
+	if src.find("\\") == -1 and src.find("^{") == -1 and src.find("_{") == -1:
+		return src
+	var s := src
+	# \int_{a}^{b} BODY \, dVAR   →   int(BODY, VAR, a, b)
+	var re_int := RegEx.new()
+	# …(body)… then a separator (\, or whitespace), then `d<var>` as a whole word.
+	# The separator + word-boundary stop the `d` inside e.g. \cdot from matching.
+	re_int.compile("\\\\int_\\{([^}]*)\\}\\^\\{([^}]*)\\}(.*?)(?:\\\\,|\\s)\\s*d\\s*([A-Za-z])\\b")
+	var m := re_int.search(s)
+	while m != null:
+		var lo := _latex_to_reduce(m.get_string(1))
+		var hi := _latex_to_reduce(m.get_string(2))
+		var bodye := _latex_to_reduce(m.get_string(3)).strip_edges()
+		var v := m.get_string(4)
+		s = s.substr(0, m.get_start()) + "int(%s, %s, %s, %s)" % [bodye, v, lo, hi] \
+			+ s.substr(m.get_end())
+		m = re_int.search(s)
+	# ^{...} → ^(...) FIRST, so a nested superscript inside a \frac / \sqrt becomes
+	# brace-free; the (non-nesting) \frac / \sqrt regexes can then match.
+	var re_sup := RegEx.new()
+	re_sup.compile("\\^\\{([^{}]*)\\}")
+	m = re_sup.search(s)
+	while m != null:
+		s = s.substr(0, m.get_start()) + "^(%s)" % m.get_string(1) + s.substr(m.get_end())
+		m = re_sup.search(s)
+	# \sqrt{a} → sqrt(a)
+	var re_sqrt := RegEx.new()
+	re_sqrt.compile("\\\\sqrt\\{([^{}]*)\\}")
+	m = re_sqrt.search(s)
+	while m != null:
+		s = s.substr(0, m.get_start()) + "sqrt(%s)" % m.get_string(1) + s.substr(m.get_end())
+		m = re_sqrt.search(s)
+	# \frac{a}{b} → ((a)/(b))
+	var re_frac := RegEx.new()
+	re_frac.compile("\\\\frac\\{([^{}]*)\\}\\{([^{}]*)\\}")
+	m = re_frac.search(s)
+	while m != null:
+		s = s.substr(0, m.get_start()) + "((%s)/(%s))" % [m.get_string(1), m.get_string(2)] \
+			+ s.substr(m.get_end())
+		m = re_frac.search(s)
+	# spacing / delimiters that REDUCE doesn't want
+	for junk in ["\\left", "\\right", "\\,", "\\;", "\\!", "\\quad", "\\qquad", "\\displaystyle"]:
+		s = s.replace(junk, "")
+	# operators / constants
+	s = s.replace("\\cdot", "*").replace("\\times", "*")
+	s = s.replace("\\infty", "infinity")
+	s = s.replace("e^", "exp")   # e^(...) → exp(...) after ^{} expansion
+	s = s.replace("expp(", "exp(")
+	# remaining \name → name (functions \sin,\cos,… and greek \lambda,\alpha,…)
+	var re_cmd := RegEx.new()
+	re_cmd.compile("\\\\([A-Za-z]+)")
+	m = re_cmd.search(s)
+	while m != null:
+		s = s.substr(0, m.get_start()) + m.get_string(1) + s.substr(m.get_end())
+		m = re_cmd.search(s)
+	# Conservative implicit multiplication: ")(" → ")*(", ") x" → ")*x",
+	# "2x"/"2(" → "2*x"/"2*(". Only `)` or a digit triggers it, so function
+	# calls like sin( are never split.
+	s = _insert_implicit_mult(s)
+	return s.strip_edges()
+
+
+func _insert_implicit_mult(s: String) -> String:
+	var out := ""
+	for i in range(s.length()):
+		var ch := s[i]
+		if i > 0:
+			var p := s[i - 1]
+			var p_close := (p == ")")
+			var p_digit := (p >= "0" and p <= "9")
+			var ch_open := (ch == "(")
+			var ch_alpha := (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z")
+			if (p_close or p_digit) and (ch_open or ch_alpha):
+				out += "*"
+		out += ch
+	return out
+
+
+## Task 126 (req #9) — build a REAL inline 3D surface plot for a cas-plot3d body
+## of the form `z = f(x, y)` (or just `f(x, y)`). Samples with Godot's Expression
+## evaluator (no engine round-trip), builds an ArrayMesh coloured by height, and
+## returns a SubViewportContainer holding a Camera3D-lit 3D scene — finally using
+## Godot's native 3D, which was the whole point of req #9.
+func _build_surface3d(expr_src: String) -> Control:
+	var e := expr_src.strip_edges()
+	var eq := e.find("=")
+	if eq != -1 and e.substr(0, eq).strip_edges().to_lower() == "z":
+		e = e.substr(eq + 1).strip_edges()
+	e = _pow_to_func(e)
+	var expr := Expression.new()
+	var err := expr.parse(e, ["x", "y"])
+	if err != OK:
+		var lbl := Label.new()
+		lbl.text = "3D plot — cannot parse z = %s  (%s)" % [e, expr.get_error_text()]
+		lbl.add_theme_color_override("font_color", _color_scheme["text"])
+		return lbl
+	# Sample a grid over x, y ∈ [-π, π].
+	var N := 28
+	var lo := -PI
+	var hi := PI
+	var stp := (hi - lo) / float(N)
+	var h := []
+	var zmin := INF
+	var zmax := -INF
+	for i in range(N + 1):
+		var row := []
+		for j in range(N + 1):
+			var z = expr.execute([lo + i * stp, lo + j * stp])
+			if not (z is float or z is int):
+				z = 0.0
+			z = float(z)
+			if is_nan(z) or is_inf(z):
+				z = 0.0
+			row.append(z)
+			zmin = minf(zmin, z)
+			zmax = maxf(zmax, z)
+		h.append(row)
+	var zr := maxf(0.001, zmax - zmin)
+	var posf := func(i: int, j: int) -> Vector3:
+		return Vector3((float(i) / N - 0.5) * 4.0,
+			(float(h[i][j]) - zmin) / zr * 2.0 - 1.0,
+			(float(j) / N - 0.5) * 4.0)
+	var colf := func(i: int, j: int) -> Color:
+		return Color.from_hsv(0.66 - 0.66 * ((float(h[i][j]) - zmin) / zr), 0.72, 0.96)
+	var stool := SurfaceTool.new()
+	stool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in range(N):
+		for j in range(N):
+			var v00: Vector3 = posf.call(i, j)
+			var v10: Vector3 = posf.call(i + 1, j)
+			var v11: Vector3 = posf.call(i + 1, j + 1)
+			var v01: Vector3 = posf.call(i, j + 1)
+			for tri in [[v00, i, j, v10, i + 1, j, v11, i + 1, j + 1],
+						[v00, i, j, v11, i + 1, j + 1, v01, i, j + 1]]:
+				stool.set_color(colf.call(tri[1], tri[2])); stool.add_vertex(tri[0])
+				stool.set_color(colf.call(tri[4], tri[5])); stool.add_vertex(tri[3])
+				stool.set_color(colf.call(tri[7], tri[8])); stool.add_vertex(tri[6])
+	stool.generate_normals()
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	stool.set_material(mat)
+	var mi := MeshInstance3D.new()
+	mi.mesh = stool.commit()
+
+	var container := SubViewportContainer.new()
+	container.stretch = true
+	container.custom_minimum_size = Vector2(0, 360)
+	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var vp := SubViewport.new()
+	vp.size = Vector2i(680, 360)
+	vp.msaa_3d = Viewport.MSAA_4X
+	container.add_child(vp)
+	var world := Node3D.new()
+	vp.add_child(world)
+	world.add_child(mi)
+	var cam := Camera3D.new()
+	cam.position = Vector3(4.5, 4.0, 4.5)
+	cam.look_at_from_position(cam.position, Vector3(0, 0, 0), Vector3.UP)
+	world.add_child(cam)
+	var key := DirectionalLight3D.new()
+	key.rotation_degrees = Vector3(-55, -40, 0)
+	world.add_child(key)
+	var fill := DirectionalLight3D.new()
+	fill.rotation_degrees = Vector3(20, 135, 0)
+	fill.light_energy = 0.45
+	world.add_child(fill)
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = _color_scheme["src_bg"]
+	env.ambient_light_color = Color(0.45, 0.45, 0.45)
+	env.ambient_light_energy = 0.7
+	var we := WorldEnvironment.new()
+	we.environment = env
+	world.add_child(we)
+	return container
+
+
+## Task 126 — convert `a^b` to `pow(a, b)` so Godot's Expression (no `^` operator)
+## can evaluate a REDUCE-style power. Handles identifiers, numbers, function
+## calls, and one level of parentheses on each side.
+func _pow_to_func(s: String) -> String:
+	var re := RegEx.new()
+	re.compile("([A-Za-z_][A-Za-z0-9_]*\\([^()]*\\)|[A-Za-z0-9_.]+|\\([^()]*\\))\\^([A-Za-z0-9_.]+|\\([^()]*\\))")
+	var out := s
+	var m := re.search(out)
+	var guard := 0
+	while m != null and guard < 60:
+		guard += 1
+		out = out.substr(0, m.get_start()) \
+			+ "pow(%s,%s)" % [m.get_string(1), m.get_string(2)] + out.substr(m.get_end())
+		m = re.search(out)
+	return out
+
+
 ## Plot x-range (the sampling grid the cas-plot command uses).
 const X_MIN := -10.0
 const X_MAX := 10.0
@@ -731,7 +1157,11 @@ func _build_menubar_popup() -> void:
 	_popup.add_item("Save        Ctrl+S", _ID_SAVE)
 	_popup.add_item("Run notebook       F5", _ID_RUN)
 	_popup.add_item("Force re-run       Ctrl+F5", _ID_FORCE)
+	_popup.add_item("Clear all outputs", _ID_CLEAR)
+	_popup.add_item("Search workspace…  Ctrl+Shift+F", _ID_SEARCH)
 	_popup.add_item("Export HTML", _ID_EXPORT)
+	_popup.add_separator()
+	_popup.add_check_item("Distraction-free", _ID_ZEN)
 	_popup.add_separator()
 	# View-mode toggle item — text refreshed by _apply_view_mode().
 	_popup.add_item("Show Source", _ID_VIEW)
@@ -847,6 +1277,12 @@ func _on_menu_id_pressed(id: int) -> void:
 		_on_export_html()
 	elif id == _ID_VIEW:
 		_toggle_view_mode()
+	elif id == _ID_CLEAR:
+		_on_clear_outputs()
+	elif id == _ID_SEARCH:
+		_on_search_workspace()
+	elif id == _ID_ZEN:
+		_toggle_distraction_free()
 	elif id == _ID_SHADOWS:
 		_shadows_on = not _shadows_on
 		StyleConfig.save(_density_key, _shadows_on, _animations_on)
@@ -890,7 +1326,7 @@ func _apply_look(key: String) -> void:
 	StyleConfig.save(_density_key, _shadows_on, _animations_on)
 	# Font family + size
 	_font_family = String(look["font_family"])
-	_font_resource = FontConfig.font_resource(_font_family)
+	_font_resource = _resolve_bold_font(_font_family)
 	_font_size = int(look["font_size"])
 	FontConfig.save_pair(_font_size, _font_family)
 	_apply_font()
@@ -954,11 +1390,21 @@ func _on_font_size_changed(v: float) -> void:
 	_apply_font()
 
 
+## Task 118 — resolve a font family and make it BOLD (bolder text throughout the
+## app, except buttons which keep the theme's normal weight). Used everywhere the
+## notebook applies its font to cells / editor / tree / labels.
+func _resolve_bold_font(family: String) -> Font:
+	var f := FontConfig.font_resource(family)
+	if f is SystemFont:
+		(f as SystemFont).font_weight = 700
+	return f
+
+
 func _on_font_family_changed(idx: int) -> void:
 	if idx < 0 or idx >= FontConfig.FAMILIES.size():
 		return
 	_font_family = FontConfig.FAMILIES[idx]["key"]
-	_font_resource = FontConfig.font_resource(_font_family)
+	_font_resource = _resolve_bold_font(_font_family)
 	FontConfig.save_pair(_font_size, _font_family)
 	_apply_font()
 
@@ -1035,10 +1481,8 @@ func _apply_view_mode() -> void:
 		_rendered_scroll.visible = _is_notebook_view
 		_editor.modulate = Color(1, 1, 1, 1)
 		_rendered_scroll.modulate = Color(1, 1, 1, 1)
-	if _view_mode_btn:
-		# Task 58 — show the action, not the current mode, so the label
-		# always says what clicking will do.
-		_view_mode_btn.text = "Show Source" if _is_notebook_view else "Show Notebook"
+	# Task 115 — tell the top-bar toggle button (main.gd) to update its label.
+	view_mode_changed.emit(_is_notebook_view)
 	# Task 66 — update the View item label inside the MenuButton popup.
 	if _popup:
 		var view_idx := _popup.get_item_index(_ID_VIEW)
@@ -1146,10 +1590,29 @@ func _emit_prose_cell(text: String) -> void:
 					% [h1_size, _smart_quotes(headline)])
 		else:
 			converted.append(_smart_quotes(line))
-	lbl.text = "\n".join(converted)
+	# Task 126 — wikilinks: [[Note]] → a clickable link that opens Note.md.
+	var rendered := _linkify_wikilinks("\n".join(converted))
+	lbl.text = rendered
 	lbl.add_theme_color_override("default_color", _color_scheme["text"])
+	if rendered.find("[url=") != -1:
+		lbl.meta_clicked.connect(_on_prose_meta_clicked)
 	_font_apply(lbl)
+	_attach_edit_on_dblclick(lbl)   # task 110 — double-click prose to edit
 	_rendered_box.add_child(lbl)
+
+
+## Task 126 — turn [[Note]] into a coloured, clickable BBCode link.
+func _linkify_wikilinks(text: String) -> String:
+	var re := RegEx.new()
+	re.compile("\\[\\[([^\\]]+)\\]\\]")
+	var out := text
+	var m := re.search(out)
+	while m != null:
+		var name := m.get_string(1)
+		var link := "[url=%s][color=#0072BD]%s[/color][/url]" % [name, name]
+		out = out.substr(0, m.get_start()) + link + out.substr(m.get_end())
+		m = re.search(out, m.get_start() + link.length())
+	return out
 
 
 ## Task 68 §C-22 — smart-quote / em-dash / ellipsis substitution in prose.
@@ -1191,7 +1654,8 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	# Task 68 §D-23 — hover state.
 	_attach_hover(src_panel, _color_scheme["src_bg"], _color_scheme["src_border"])
 	# Task 68 §D-27 — right-click → Copy / Re-run.
-	_attach_cell_context_menu(src_panel, block["body"].strip_edges(), block["kind"])
+	_attach_cell_context_menu(src_panel, block["body"].strip_edges(), block["kind"], int(block["start"]))
+	_attach_edit_on_dblclick(src_panel, int(block["start"]))   # task 110/111 — dblclick → edit this cell
 	var src_v := VBoxContainer.new()
 	src_v.add_theme_constant_override("separation", int(_density["chip_offset"]))
 	src_panel.add_child(src_v)
@@ -1223,6 +1687,8 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	src_text.bbcode_enabled = false
 	src_text.fit_content = true
 	src_text.scroll_active = false
+	# Task 110 — let the double-click reach the panel's edit handler.
+	src_text.mouse_filter = Control.MOUSE_FILTER_PASS
 	src_text.text = block["body"].strip_edges()
 	src_text.add_theme_color_override("default_color", _color_scheme["text"])
 	_font_apply(src_text)
@@ -1261,6 +1727,23 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 		_rendered_box.add_child(plot_cell)
 		return
 
+	# Task 126 (req #9) — real inline 3D surface for cas-plot3d blocks.
+	if block["kind"] == NotebookRunner.KIND_PLOT3D:
+		var cell3d := PanelContainer.new()
+		cell3d.add_theme_stylebox_override("panel",
+			_make_cell_box(_color_scheme["res_bg"], _color_scheme["res_border"]))
+		var v3 := VBoxContainer.new()
+		v3.add_theme_constant_override("separation", int(_density["chip_offset"]))
+		cell3d.add_child(v3)
+		var chip3 := Label.new()
+		chip3.text = "= 3D surface   %s" % block["body"].strip_edges()
+		chip3.add_theme_color_override("font_color", _color_scheme["res_chip"])
+		chip3.add_theme_font_size_override("font_size", int(_density["chip_size"]))
+		v3.add_child(chip3)
+		v3.add_child(_build_surface3d(block["body"]))
+		_rendered_box.add_child(cell3d)
+		return
+
 	if paired_result == null:
 		return
 	var res_panel := PanelContainer.new()
@@ -1268,7 +1751,8 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 		_make_cell_box(_color_scheme["res_bg"], _color_scheme["res_border"]))
 	_attach_hover(res_panel, _color_scheme["res_bg"], _color_scheme["res_border"])
 	_attach_cell_context_menu(res_panel,
-		NotebookRunner.payload_only(paired_result["body"]), "cas-result")
+		NotebookRunner.payload_only(paired_result["body"]), "cas-result", int(block["start"]))
+	_attach_edit_on_dblclick(res_panel, int(block["start"]))   # task 110/111 — dblclick → edit this cell
 	var res_v := VBoxContainer.new()
 	res_v.add_theme_constant_override("separation", int(_density["chip_offset"]))
 	res_panel.add_child(res_v)
@@ -1281,6 +1765,7 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	res_text.bbcode_enabled = false
 	res_text.fit_content = true
 	res_text.scroll_active = false
+	res_text.mouse_filter = Control.MOUSE_FILTER_PASS   # task 110 — dblclick to edit
 	res_text.text = NotebookRunner.payload_only(paired_result["body"])
 	res_text.add_theme_color_override("default_color", _color_scheme["text"])
 	_font_apply(res_text)
@@ -1303,19 +1788,23 @@ func _attach_hover(panel: PanelContainer, bg: Color, border: Color) -> void:
 
 
 ## Task 68 §D-27 — right-click → small PopupMenu with Copy / Re-run actions.
-func _attach_cell_context_menu(panel: PanelContainer, body: String, kind: String) -> void:
+## Task 111 — plus "Edit this cell" (jump to its source line in the editor).
+func _attach_cell_context_menu(panel: PanelContainer, body: String, kind: String, line: int = -1) -> void:
 	panel.gui_input.connect(func(ev):
 		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_RIGHT \
 				and ev.pressed:
 			var menu := PopupMenu.new()
-			menu.add_item("Copy source")
+			menu.add_item("Edit this cell", 10)
+			menu.add_item("Copy source", 0)
 			menu.add_separator()
 			if kind != "cas-result" and kind != "cas-test-result" \
 					and kind != "cas-derive-result" and kind != "cas-plot-result":
-				menu.add_item("Re-run this block (Force re-run all)")
+				menu.add_item("Re-run this block (Force re-run all)", 2)
 			add_child(menu)
 			menu.id_pressed.connect(func(id):
-				if id == 0:
+				if id == 10:
+					_edit_at_line(line)
+				elif id == 0:
 					DisplayServer.clipboard_set(body)
 					_status.text = "Copied: %s" % body.substr(0, 40).replace("\n", " ")
 				elif id == 2:
@@ -1330,13 +1819,45 @@ func _attach_cell_context_menu(panel: PanelContainer, body: String, kind: String
 ## Task 94 — a MATLAB-style docked-panel title bar (grey strip + a thin bottom
 ## border). Returns [PanelContainer, Label]; both are recoloured per active
 ## scheme by _apply_chrome_colors().
+## Task 110 — double-clicking anywhere in the rendered notebook jumps into the
+## editable Source view, so editing feels natural (no need to find a toggle).
+## Task 111 — and lands the caret on the clicked cell's source line, so it's
+## edit-*this*-cell, not just "switch to source".
+func _attach_edit_on_dblclick(ctrl: Control, line: int = -1) -> void:
+	ctrl.gui_input.connect(func(ev):
+		if ev is InputEventMouseButton and ev.double_click \
+				and ev.button_index == MOUSE_BUTTON_LEFT and _is_notebook_view:
+			_edit_at_line(line))
+
+
+## Task 111 — switch to the editable Source view and place the caret on `line`
+## (the source line of the cell the user acted on). Used by double-click and the
+## cell context menu's "Edit this cell".
+func _edit_at_line(line: int) -> void:
+	if _is_notebook_view:
+		_toggle_view_mode()    # → editable Source view
+	if _editor == null:
+		return
+	if line >= 0 and line < _editor.get_line_count():
+		_editor.set_caret_line(line)
+		_editor.set_caret_column(0)
+		_editor.center_viewport_to_caret()
+	_editor.grab_focus()
+
+
 func _make_title_bar(text: String) -> Array:
 	var bar := PanelContainer.new()
+	# Task 110 — a row, so callers can add controls (e.g. the editor's Edit/View
+	# toggle button) to the right of the title label.
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 8)
+	bar.add_child(hb)
 	var lbl := Label.new()
 	lbl.text = text
 	lbl.add_theme_font_size_override("font_size", 26)   # task 96 — doubled
-	bar.add_child(lbl)
-	return [bar, lbl]
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hb.add_child(lbl)
+	return [bar, lbl, hb]
 
 
 ## Task 94 — derive a "chrome" (title-bar / status) fill from the scheme's
@@ -1381,8 +1902,17 @@ func _apply_chrome_colors() -> void:
 		sel.bg_color = _color_scheme["src_border"].lerp(_color_scheme["bg"], 0.6)
 		_sidebar_tree.add_theme_stylebox_override("selected", sel)
 		_sidebar_tree.add_theme_stylebox_override("selected_focus", sel)
+		# Task 107 — the default hover highlight is a dark box that hid the
+		# (dark) filename text on the light scheme. Use a faint, scheme-tinted
+		# hover box and keep the text colour readable on hover.
+		var hov := StyleBoxFlat.new()
+		hov.bg_color = _color_scheme["src_border"].lerp(_color_scheme["bg"], 0.82)
+		_sidebar_tree.add_theme_stylebox_override("hovered", hov)
+		_sidebar_tree.add_theme_stylebox_override("hovered_dimmed", hov)
 		_sidebar_tree.add_theme_color_override("font_color", _color_scheme["text"])
 		_sidebar_tree.add_theme_color_override("font_selected_color", _color_scheme["text"])
+		_sidebar_tree.add_theme_color_override("font_hovered_color", _color_scheme["text"])
+		_sidebar_tree.add_theme_color_override("font_hovered_dimmed_color", _color_scheme["text"])
 	# Path + status labels.
 	if _path_label:
 		_path_label.add_theme_color_override("font_color", _color_scheme["text"])

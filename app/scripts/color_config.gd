@@ -111,6 +111,21 @@ const SCHEMES := {
 		"text":        Color(0.102, 0.102, 0.102),   # #1A1A1A near-black
 		"muted":       Color(0.435, 0.435, 0.435),   # #6F6F6F caption grey
 	},
+	# Task 129 — MATLAB dark theme. Charcoal desktop, near-black editor/command
+	# panels, the same signature MATLAB blue / orange accents but brightened so
+	# they read on the dark panels, light grey text.
+	"matlab_dark": {
+		"label": "MATLAB Dark",
+		"bg":          Color(0.149, 0.149, 0.149),   # #262626 desktop charcoal
+		"src_bg":      Color(0.118, 0.118, 0.118),   # #1E1E1E editor / command panel
+		"src_border":  Color(0.150, 0.620, 0.910),   # brightened MATLAB blue
+		"src_chip":    Color(0.300, 0.700, 0.980),
+		"res_bg":      Color(0.165, 0.149, 0.129),   # warm-tinted dark result panel
+		"res_border":  Color(0.950, 0.450, 0.180),   # brightened MATLAB orange
+		"res_chip":    Color(1.000, 0.560, 0.260),
+		"text":        Color(0.902, 0.902, 0.902),   # #E6E6E6 light grey
+		"muted":       Color(0.600, 0.620, 0.650),
+	},
 }
 
 
@@ -133,8 +148,8 @@ static func scheme(key: String) -> Dictionary:
 
 
 static func ordered_keys() -> Array:
-	return ["matlab", "dark", "light", "solarized_dark", "solarized_light",
-		"colorblind", "high_contrast"]
+	return ["matlab", "matlab_dark", "dark", "light", "solarized_dark",
+		"solarized_light", "colorblind", "high_contrast"]
 
 
 static func index_of(key: String) -> int:

@@ -51,6 +51,7 @@ var _advanced: AdvancedView
 var _pkg_settings: PackageSettings
 var _icon_menubar: IconMenuBar    # task 69 — kept so we can add the Notebook
                                    # category to it after _notebook is created.
+var _view_toggle_btn: Button       # task 115 — top-bar Source/Notebook toggle
 var _calc_root: Control
 
 # per-request routing: id -> {kind, node}
@@ -133,6 +134,12 @@ func _ready() -> void:
 		# next to the other buttons; runs every cell in the open notebook.
 		_icon_menubar.add_action(
 			"▶", "Run All", _run_all_notebook, Color(0.40, 0.80, 0.55))
+		# Task 115 — the Source/Notebook view toggle as a proper top button
+		# (matching the others), replacing the old in-notebook full-width button.
+		# Its label follows the current mode via the notebook's signal.
+		_view_toggle_btn = _icon_menubar.add_action(
+			"✎", "Source", func(): _notebook._toggle_view_mode(), Color(0.55, 0.55, 0.95))
+		_notebook.view_mode_changed.connect(_on_view_mode_changed)
 	# Reserve room at the top for the IconMenuBar toolbar — the notebook view
 	# is now the default opening pane (replacing the calculator's middle area),
 	# but the toolbar above must stay visible and unchanged.
@@ -168,6 +175,10 @@ func _ready() -> void:
 	if "--math-test" in args or OS.get_cmdline_args().has("--math-test"):
 		var mt := preload("res://scripts/_mathtest.gd").new()
 		add_child(mt)
+	# Task 127 — unit-test the task-126 features, then quit.
+	if "--test126" in args or OS.get_cmdline_args().has("--test126"):
+		preload("res://scripts/_test126.gd").run()
+		get_tree().quit.call_deferred()
 	if "--advanced" in args or OS.get_cmdline_args().has("--advanced"):
 		_toggle_advanced.call_deferred()
 	if "--packages" in args or OS.get_cmdline_args().has("--packages"):
@@ -178,6 +189,10 @@ func _ready() -> void:
 		_open_inteq_and_run.call_deferred()
 	if "--demo-diffint" in args or OS.get_cmdline_args().has("--demo-diffint"):
 		_open_diffint_and_run.call_deferred()
+	if "--demo-nlie" in args or OS.get_cmdline_args().has("--demo-nlie"):
+		_open_named_notebook_and_run.bind("nonlinear_integral_eq.md").call_deferred()
+	if "--demo-126" in args or OS.get_cmdline_args().has("--demo-126"):
+		_open_named_notebook_and_run.bind("features_126.md").call_deferred()
 	if "--demo-task37" in args or OS.get_cmdline_args().has("--demo-task37"):
 		_open_task37_and_run.call_deferred()
 	if "--demo-popupmenu" in args or OS.get_cmdline_args().has("--demo-popupmenu"):
@@ -299,7 +314,13 @@ func _open_named_notebook_and_run(filename: String) -> void:
 	if not FileAccess.file_exists(path):
 		return
 	_notebook._open_file_at(path)
-	await get_tree().create_timer(1.5).timeout
+	# Wait until the engine is actually ready before running (a fixed delay can
+	# fire before REDUCE has booted, which silently no-ops the run).
+	var tries := 0
+	while not MathEngine.is_ready() and tries < 50:
+		await get_tree().create_timer(0.2).timeout
+		tries += 1
+	await get_tree().create_timer(0.3).timeout
 	_notebook._on_force_run()
 
 
@@ -694,6 +715,17 @@ func _toggle_notebook() -> void:
 			_notebook.open_workspace(sample)
 
 
+## Task 115 — keep the top-bar toggle button's glyph + label in step with the
+## notebook's current view (showing what a click will do).
+func _on_view_mode_changed(is_notebook_view: bool) -> void:
+	if _view_toggle_btn == null or _icon_menubar == null:
+		return
+	if is_notebook_view:
+		_icon_menubar.set_button_glyph(_view_toggle_btn, "✎", "Source")
+	else:
+		_icon_menubar.set_button_glyph(_view_toggle_btn, "▤", "Notebook")
+
+
 ## Task 96 — "Run All" toolbar button: make the notebook visible and run every
 ## cell in the open file.
 func _run_all_notebook() -> void:
@@ -766,6 +798,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_S and event.ctrl_pressed and _notebook and _notebook.visible:
 			_notebook._on_save()
 			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_E and event.ctrl_pressed and _notebook and _notebook.visible:
+			# Task 111 — toggle between the rendered notebook and editable source.
+			_notebook._toggle_view_mode()
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_F and event.ctrl_pressed and event.shift_pressed \
+				and _notebook and _notebook.visible:
+			# Task 126 — workspace search (req #13).
+			_notebook._on_search_workspace()
+			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_F11:
 			_toggle_fullscreen()
 			get_viewport().set_input_as_handled()
@@ -804,7 +845,13 @@ func _make_theme() -> Theme:
 	# them.
 	var matlab_font := FontConfig.font_resource("matlab")
 	if matlab_font:
-		t.default_font = matlab_font
+		# Task 118 — bolder fonts throughout the app, EXCEPT buttons. The default
+		# font is a bold-weight Courier New; Button keeps the normal weight.
+		var bold_font := FontConfig.font_resource("matlab")
+		if bold_font is SystemFont:
+			(bold_font as SystemFont).font_weight = 700
+		t.default_font = bold_font
+		t.set_font("font", "Button", matlab_font)   # buttons stay normal weight
 	# Larger default font size everywhere (task 9).
 	t.default_font_size = FONT_BASE
 	t.set_font_size("font_size", "Label", FONT_BASE)
@@ -898,6 +945,18 @@ func _make_theme() -> Theme:
 	t.set_stylebox("hover", "PopupMenu", pop_hover)
 	t.set_color("font_color", "PopupMenu", COL_TEXT)
 	t.set_color("font_hover_color", "PopupMenu", COL_TEXT)
+
+	# Task 107/118 — tooltips (e.g. the file tree's full-filename popup) were a
+	# DARK box with low-contrast text that obscured the filename underneath.
+	# Theme them light to match the app so the name is readable, not hidden.
+	var tip_bg := StyleBoxFlat.new()
+	tip_bg.bg_color = COL_PANEL
+	tip_bg.set_corner_radius_all(RADIUS)
+	tip_bg.set_content_margin_all(6)
+	tip_bg.set_border_width_all(1)
+	tip_bg.border_color = COL_BORDER
+	t.set_stylebox("panel", "TooltipPanel", tip_bg)
+	t.set_color("font_color", "TooltipLabel", COL_TEXT)
 
 	t.set_color("font_color", "Label", COL_TEXT)
 	t.set_color("font_color", "Button", COL_TEXT)
