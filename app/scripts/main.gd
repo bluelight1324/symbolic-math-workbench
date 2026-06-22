@@ -174,6 +174,10 @@ func _ready() -> void:
 		_open_package_settings.call_deferred()
 	if "--demo-plotnb" in args or OS.get_cmdline_args().has("--demo-plotnb"):
 		_open_plot_notebook_and_run.call_deferred()
+	if "--demo-inteq" in args or OS.get_cmdline_args().has("--demo-inteq"):
+		_open_inteq_and_run.call_deferred()
+	if "--demo-diffint" in args or OS.get_cmdline_args().has("--demo-diffint"):
+		_open_diffint_and_run.call_deferred()
 	if "--demo-task37" in args or OS.get_cmdline_args().has("--demo-task37"):
 		_open_task37_and_run.call_deferred()
 	if "--demo-popupmenu" in args or OS.get_cmdline_args().has("--demo-popupmenu"):
@@ -269,6 +273,29 @@ func _open_task37_and_run() -> void:
 	if not _notebook.visible:
 		_toggle_notebook()
 	var path := "i:/mathdot/app/notebooks_sample/task37_system.md"
+	if not FileAccess.file_exists(path):
+		return
+	_notebook._open_file_at(path)
+	await get_tree().create_timer(1.5).timeout
+	_notebook._on_force_run()
+
+
+## Task 104 — open the integral-equation notebook and run every cell.
+func _open_inteq_and_run() -> void:
+	_open_named_notebook_and_run("integral_equation.md")
+
+
+## Task 105 — open the difficult-integral notebook and run every cell.
+func _open_diffint_and_run() -> void:
+	_open_named_notebook_and_run("difficult_integral.md")
+
+
+func _open_named_notebook_and_run(filename: String) -> void:
+	if _notebook == null:
+		return
+	if not _notebook.visible:
+		_toggle_notebook()
+	var path := "i:/mathdot/app/notebooks_sample/".path_join(filename)
 	if not FileAccess.file_exists(path):
 		return
 	_notebook._open_file_at(path)

@@ -14,6 +14,7 @@ if (-not $IsccPath) {
     Write-Host "Searching for Inno Setup..." -ForegroundColor Yellow
 
     $searchPaths = @(
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
         "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
         "C:\Program Files\Inno Setup 6\ISCC.exe",
         "C:\Program Files (x86)\Inno Setup 5\ISCC.exe",
@@ -42,7 +43,7 @@ if (-not $IsccPath -or -not (Test-Path $IsccPath)) {
 
 # Check for required files
 $requiredFiles = @(
-    "symbolic-math-workbench.iss",
+    "mathdot.iss",
     "app\project.godot",
     "tools\godot\Godot_v4.6.3-stable_win64.exe",
     "tools\reduce\bin\rfcsl.exe"
@@ -77,10 +78,10 @@ if (-not (Test-Path $outDir)) {
 # Build the installer
 Write-Host ""
 Write-Host "Building installer..." -ForegroundColor Cyan
-Write-Host "Command: & '$IsccPath' symbolic-math-workbench.iss"
+Write-Host "Command: & '$IsccPath' mathdot.iss"
 Write-Host ""
 
-& $IsccPath "symbolic-math-workbench.iss"
+& $IsccPath "mathdot.iss"
 
 $buildResult = $LASTEXITCODE
 
@@ -95,7 +96,7 @@ if ($buildResult -eq 0) {
     }
     Write-Host ""
     Write-Host "You can now distribute the installer or test it by running:" -ForegroundColor Cyan
-    Write-Host "  .\installers\Symbolic-Math-Workbench-1.1.0-Setup.exe"
+    Write-Host "  .\installers\mathdot-1.2.0-Setup.exe"
 } else {
     Write-Host "FAILED!" -ForegroundColor Red
     Write-Host "Build exited with code: $buildResult" -ForegroundColor Red

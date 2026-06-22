@@ -102,3 +102,9 @@ does the installer work.
  99. integrate plotting in the notebook itself, instead of a separate ploter window.
  do 1 doc.
  100. update github. and do 1 doc.
+ 101.create an installer fo the mathdot app and call the app mathdot. do 1 doc.
+102. App was installed perfectly but the launch window is blank. checkup and do 1 doc. see screenshot.
+103. will godot be installed along with the app. if not why not. do 1 doc.
+104. create a notebook file to solv a difficult integral equation, and load it in the app. do 1 doc later.
+105. do not add your commentary or the solution. what can it do on its own. show another difficult integral equation. do 1 doc
+106. push to github and do 1 doc.
