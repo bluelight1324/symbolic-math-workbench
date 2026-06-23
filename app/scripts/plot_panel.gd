@@ -9,6 +9,23 @@ var _axis_color := Color(0.5, 0.55, 0.62)
 var _grid_color := Color(0.27, 0.30, 0.36)
 var _curve_color := Color(0.36, 0.74, 1.0)
 var _bg := Color(0.11, 0.12, 0.15)
+var _zoom := 1.0   # task 136 — magnification around the panel centre
+
+
+## Task 136 — zoom the plot in / out (uniform magnification about the centre).
+func zoom_in() -> void:
+	_zoom = minf(_zoom * 1.3, 30.0)
+	queue_redraw()
+
+
+func zoom_out() -> void:
+	_zoom = maxf(_zoom / 1.3, 0.2)
+	queue_redraw()
+
+
+func zoom_reset() -> void:
+	_zoom = 1.0
+	queue_redraw()
 
 
 func set_samples(x_min: float, x_max: float, ys: PackedFloat64Array) -> void:
@@ -45,6 +62,11 @@ func _draw() -> void:
 	if _samples.is_empty():
 		return
 
+	# Task 136 — zoom: magnify everything below about the panel centre. The bg
+	# above is drawn unscaled; clip_contents (set by the caller) hides overflow.
+	if not is_equal_approx(_zoom, 1.0):
+		draw_set_transform(size * 0.5 * (1.0 - _zoom), 0.0, Vector2(_zoom, _zoom))
+
 	# Determine y-range from data (fallback to symmetric range).
 	var y_min := -10.0
 	var y_max := 10.0
@@ -69,13 +91,13 @@ func _draw() -> void:
 		var gy := h * i / 10.0
 		draw_line(Vector2(0, gy), Vector2(w, gy), _grid_color, 1.0)
 
-	# Axes (x=0 and y=0 if within range).
+	# Axes (x=0 and y=0 if within range). Task 136 — thicker for clarity.
 	if y_min < 0.0 and y_max > 0.0:
 		var ay := h - (0.0 - y_min) / (y_max - y_min) * h
-		draw_line(Vector2(0, ay), Vector2(w, ay), _axis_color, 2.0)
+		draw_line(Vector2(0, ay), Vector2(w, ay), _axis_color, 3.0)
 	if _x_min < 0.0 and _x_max > 0.0:
 		var ax := (0.0 - _x_min) / (_x_max - _x_min) * w
-		draw_line(Vector2(ax, 0), Vector2(ax, h), _axis_color, 2.0)
+		draw_line(Vector2(ax, 0), Vector2(ax, h), _axis_color, 3.0)
 
 	# Curve.
 	if _samples.size() >= 2:
@@ -89,4 +111,4 @@ func _draw() -> void:
 			var py := h - (v - y_min) / (y_max - y_min) * h
 			pts.append(Vector2(px, py))
 		if pts.size() >= 2:
-			draw_polyline(pts, _curve_color, 2.0, true)
+			draw_polyline(pts, _curve_color, 3.5, true)   # task 136 — bolder curve

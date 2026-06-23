@@ -618,7 +618,7 @@ func _dispatch_next_block() -> void:
 			# Same sampling cmd the calculator-mode plot uses (task 7).
 			var x_min := -10.0
 			var x_max := 10.0
-			var n := 60
+			var n := 120   # task 136 — finer sampling → smoother, clearer curve
 			var step := (x_max - x_min) / float(n)
 			cmd = "on rounded; for i:=0:%d collect sub(x=(%f)+(i+0.5)*(%f), %s); off rounded" % [
 				n, x_min, step, body]
@@ -1038,7 +1038,7 @@ func _build_surface3d(expr_src: String) -> Control:
 		lbl.add_theme_color_override("font_color", _color_scheme["text"])
 		return lbl
 	# Sample a grid over x, y ∈ [-π, π].
-	var N := 28
+	var N := 56   # task 136/139 — finer mesh → smoother, higher-detail surface
 	var lo := -PI
 	var hi := PI
 	var stp := (hi - lo) / float(N)
@@ -1064,7 +1064,12 @@ func _build_surface3d(expr_src: String) -> Control:
 			(float(h[i][j]) - zmin) / zr * 2.0 - 1.0,
 			(float(j) / N - 0.5) * 4.0)
 	var colf := func(i: int, j: int) -> Color:
-		return Color.from_hsv(0.66 - 0.66 * ((float(h[i][j]) - zmin) / zr), 0.72, 0.96)
+		# Task 140 — height drives hue (blue valley → warm peak) AND brightness
+		# (dark valley → bright peak). The value ramp is a free depth cue that, on
+		# the new dark background, makes the surface read far more three-dimensional
+		# without any extra GPU work.
+		var t := (float(h[i][j]) - zmin) / zr
+		return Color.from_hsv(0.63 - 0.63 * t, 0.82, 0.40 + 0.55 * t)
 	var stool := SurfaceTool.new()
 	stool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in range(N):
@@ -1079,44 +1084,139 @@ func _build_surface3d(expr_src: String) -> Control:
 				stool.set_color(colf.call(tri[4], tri[5])); stool.add_vertex(tri[3])
 				stool.set_color(colf.call(tri[7], tri[8])); stool.add_vertex(tri[6])
 	stool.generate_normals()
-	var mat := StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# Task 143 — the custom spatial shader documented (but not built) in task 139.
+	# Keeps the PBR look (roughness/metallic/rim, vertex-colour albedo) and adds
+	# anti-aliased iso-height CONTOUR LINES on the surface — the classic
+	# math-visualisation read. It's a single fragment shader, so there is NO extra
+	# render pass and effectively no GPU cost (honours task 140).
+	var shader := Shader.new()
+	shader.code = "shader_type spatial;\n" \
+		+ "render_mode cull_disabled;\n" \
+		+ "uniform float bands = 9.0;\n" \
+		+ "uniform vec3 line_color : source_color = vec3(0.04, 0.04, 0.06);\n" \
+		+ "varying float v_h;\n" \
+		+ "void vertex() { v_h = VERTEX.y; }\n" \
+		+ "void fragment() {\n" \
+		+ "	ALBEDO = COLOR.rgb;\n" \
+		+ "	ROUGHNESS = 0.42; METALLIC = 0.12; RIM = 0.35; RIM_TINT = 0.2;\n" \
+		+ "	float s = v_h * bands;\n" \
+		+ "	float d = min(fract(s), 1.0 - fract(s));\n" \
+		+ "	float w = fwidth(s) * 1.3 + 0.012;\n" \
+		+ "	float line = smoothstep(0.0, w, d);\n" \
+		+ "	ALBEDO = mix(line_color, ALBEDO, line);\n" \
+		+ "}\n"
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
 	stool.set_material(mat)
 	var mi := MeshInstance3D.new()
 	mi.mesh = stool.commit()
 
 	var container := SubViewportContainer.new()
 	container.stretch = true
-	container.custom_minimum_size = Vector2(0, 360)
-	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)  # fills the stack
+	# Task 137 — don't let the 3D viewport swallow the scroll wheel; IGNORE → the
+	# wheel propagates to the page ScrollContainer so the page can scroll past the
+	# plot. Task 142 — a transparent drag-overlay above it handles left-drag
+	# rotation (it's PASS, so the wheel still reaches the page).
+	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var vp := SubViewport.new()
-	vp.size = Vector2i(680, 360)
-	vp.msaa_3d = Viewport.MSAA_4X
+	vp.size = Vector2i(1120, 560)                      # task 136 — higher resolution
+	vp.msaa_3d = Viewport.MSAA_8X                      # task 136 — smoother edges
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA # task 139 — extra edge AA
 	container.add_child(vp)
 	var world := Node3D.new()
 	vp.add_child(world)
 	world.add_child(mi)
 	var cam := Camera3D.new()
-	cam.position = Vector3(4.5, 4.0, 4.5)
+	cam.position = Vector3(4.0, 3.5, 4.0)              # task 136 — closer → surface fills more
 	cam.look_at_from_position(cam.position, Vector3(0, 0, 0), Vector3.UP)
 	world.add_child(cam)
 	var key := DirectionalLight3D.new()
 	key.rotation_degrees = Vector3(-55, -40, 0)
+	key.light_energy = 1.15
+	key.shadow_enabled = true                          # task 139 — self-shadowing depth
 	world.add_child(key)
 	var fill := DirectionalLight3D.new()
 	fill.rotation_degrees = Vector3(20, 135, 0)
-	fill.light_energy = 0.45
+	fill.light_energy = 0.4
 	world.add_child(fill)
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = _color_scheme["src_bg"]
-	env.ambient_light_color = Color(0.45, 0.45, 0.45)
-	env.ambient_light_energy = 0.7
+	# Task 140 — a dark plot background (regardless of the notebook theme) so the
+	# lit surface, rim light and bloom stand out instead of washing against white.
+	env.background_color = Color(0.07, 0.08, 0.10)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.5, 0.5, 0.55)
+	env.ambient_light_energy = 0.55
+	# Task 139 — lean on Godot's renderer: filmic tonemapping, screen-space
+	# ambient occlusion that darkens the valleys, and a soft bloom on highlights.
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 1.05
+	env.ssao_enabled = true
+	env.ssao_radius = 0.7
+	env.ssao_intensity = 2.2
+	env.glow_enabled = true                            # subtle highlight bloom only
+	env.glow_intensity = 0.32
+	env.glow_bloom = 0.05
+	env.glow_hdr_threshold = 1.1
 	var we := WorldEnvironment.new()
 	we.environment = env
 	world.add_child(we)
-	return container
+	# Task 142 — left-click-and-hold to rotate the surface in all planes. A
+	# transparent overlay (mouse_filter PASS) sits over the 3D viewport: it
+	# handles the left-drag (yaw on horizontal motion, pitch on vertical), while
+	# the scroll wheel still passes through to the page (task 137).
+	var stack := Control.new()
+	stack.custom_minimum_size = Vector2(0, 560)
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE   # task 137 — wheel falls through
+	stack.add_child(container)
+	var drag := Control.new()
+	drag.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	drag.mouse_filter = Control.MOUSE_FILTER_PASS
+	drag.mouse_default_cursor_shape = Control.CURSOR_MOVE
+	var dragging := [false]
+	drag.gui_input.connect(func(ev):
+		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT:
+			dragging[0] = ev.pressed
+		elif ev is InputEventMouseMotion and dragging[0]:
+			mi.global_rotate(Vector3.UP, deg_to_rad(-ev.relative.x * 0.4))
+			mi.global_rotate(Vector3.RIGHT, deg_to_rad(-ev.relative.y * 0.4)))
+	stack.add_child(drag)
+
+	# Task 136 — zoom dolly + reset (rotation reset folded into ⟳).
+	var wrap := VBoxContainer.new()
+	wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wrap.add_child(_make_zoom_bar(
+		func(): cam.position *= 1.18; cam.look_at(Vector3.ZERO, Vector3.UP),   # zoom out
+		func(): cam.position *= 0.85; cam.look_at(Vector3.ZERO, Vector3.UP),   # zoom in
+		func(): mi.rotation = Vector3.ZERO; cam.position = Vector3(4.0, 3.5, 4.0); cam.look_at(Vector3.ZERO, Vector3.UP)))
+	wrap.add_child(stack)
+	return wrap
+
+
+## Task 136 — a small "zoom −/+/⟳" control bar shared by the 2D and 3D plot cells.
+func _make_zoom_bar(on_out: Callable, on_in: Callable, on_reset: Callable) -> HBoxContainer:
+	var bar := HBoxContainer.new()
+	bar.add_theme_constant_override("separation", 4)
+	var lbl := Label.new()
+	lbl.text = "zoom"
+	lbl.add_theme_font_size_override("font_size", int(_density["chip_size"]))
+	lbl.add_theme_color_override("font_color", _color_scheme["muted"])
+	bar.add_child(lbl)
+	bar.add_child(_zoom_btn("−", on_out))
+	bar.add_child(_zoom_btn("+", on_in))
+	bar.add_child(_zoom_btn("⟳", on_reset))
+	return bar
+
+
+func _zoom_btn(txt: String, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = txt
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(44, 34)
+	b.pressed.connect(cb)
+	return b
 
 
 ## Task 126 — convert `a^b` to `pow(a, b)` so Godot's Expression (no `^` operator)
@@ -1549,6 +1649,11 @@ func _rebuild_rendered_cells() -> void:
 			i += 1
 	if prose_buf.size() > 0:
 		_emit_prose_cell("\n".join(prose_buf))
+	# Task 138 — extra scroll room at the bottom so the last cell (e.g. a tall
+	# 3D plot) can be scrolled fully into view instead of bumping the bottom edge.
+	var tail := Control.new()
+	tail.custom_minimum_size = Vector2(0, 480)
+	_rendered_box.add_child(tail)
 
 
 func _emit_prose_cell(text: String) -> void:
@@ -1713,14 +1818,17 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 		plot_chip.add_theme_font_size_override("font_size", int(_density["chip_size"]))
 		pv.add_child(plot_chip)
 		var plot_panel := preload("res://scripts/plot_panel.gd").new()
-		plot_panel.custom_minimum_size = Vector2(0, 260)
+		plot_panel.custom_minimum_size = Vector2(0, 440)   # task 136 — bigger 2D plot
 		plot_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		plot_panel.clip_contents = true                    # task 136 — clip zoom overflow
 		if plot_panel.has_method("set_theme_colors"):
 			plot_panel.set_theme_colors(
 				_color_scheme["src_bg"],                                   # plot bg
 				_color_scheme["muted"],                                    # axes
 				_color_scheme["muted"].lerp(_color_scheme["src_bg"], 0.6), # grid
 				_color_scheme["src_border"])                               # curve
+		# Task 136 — zoom controls for the 2D plot.
+		pv.add_child(_make_zoom_bar(plot_panel.zoom_out, plot_panel.zoom_in, plot_panel.zoom_reset))
 		pv.add_child(plot_panel)
 		if plot_panel.has_method("set_samples"):
 			plot_panel.set_samples(X_MIN, X_MAX, ys)

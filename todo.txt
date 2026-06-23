@@ -136,3 +136,69 @@ f(x)=\lambda\int_{-\infty}^{\infty}e^{-(x-t)^2}f(t)\,dt+\int_{0}^{x}(x-t)f(t)^3\
 colored file names. do 1 doc.
 130. is reduce cas also instaled with the installer. do 1 doc
 131. update github and do 1 doc
+133  solve using mathdot , do not simplify. show parabolic and hyperbolic  plots on  curved spacetime using the below use curved spacetime.
+\[
+ds^{2}
+=
+-\,dt^{2}
+\;+\;
+\Omega(x)^{2}\,\big(dx_{1}^{2} + \cdots + dx_{n}^{2}\big),
+\qquad (t,x)\in\mathbb{R}\times\mathbb{R}^{n},
+\]
+\[
+\Omega(x)
+=
+\frac{1}{
+\operatorname{dist}(x,\Sigma_{0})^{\alpha_{0}}\,
+\operatorname{dist}(x,\Sigma_{1})^{\alpha_{1}}\,
+\operatorname{dist}(x,\Sigma_{2})^{\alpha_{2}}
+},
+\qquad x\in\mathbb{R}^{n},
+\]
+
+\[
+\Sigma_{2} \subset \Sigma_{1} \subset \Sigma_{0} \subset \mathbb{R}^{n},
+\qquad
+\alpha_{0},\alpha_{1},\alpha_{2} > 0.
+\]
+
+
+135. solve using mathdot , do not simplify show plots in the script
+\[
+\big(\partial_s^{4} u(s,x)\big)^{2}
+\;+\;
+\kappa(s)\,\big(\partial_s^{2} u(s,x)\big)^{3}
+\;-\;
+\det\!\big(D_x^{2} u(s,x)\big)
+\;+\;
+\big\|D_x^{2} u(s,x)\big\|^{2}
+\;=\;
+\big|u(s,x)\big|^{p-1}u(s,x),
+\qquad s\in I,\; x\in\mathbb{R}^{d}.
+\]
+
+with the singular time curve
+\[
+\gamma(s) = \big(s^{2},\, s^{3} + s^{4}\big),
+\]
+
+and curvature
+\[
+\kappa(s) = 
+\frac{\|\gamma'(s)\times\gamma''(s)\|}
+     {\|\gamma'(s)\|^{3}},
+\]
+
+136. In the above 2 tasks The  plots need to have increased clarity and be  bigger.
+provide ability to zoom in or out on the plots. do 1 doc.
+136.1 Apply the above to all plots which mathdot creates. do 1 doc.
+137. In both tha above tasks the notebook page does not scroll to the end,it gets stuck . Check and fix. and then do 1 doc.
+138. notebook page needs to scroll some more.do 1 doc.
+139. ho will you improve the graphics of the 3d plot to maximum possible,considering
+youre running godot game engine. do 1 doc.
+140. the screen background needs to be darker for the plot. how can you improve even more on the plot without increase in gpu. ref doc app_screenshot_task139.png
+141 how will u rotate the plot in all planes. do 1 doc.
+142 instead of rotate buttons, use just mouse left click and hold  to rotate. do 1 doc.
+143. implement the above tasks which are still doc. do 1 doc.
+144. do a thorough test of what you implemented above. do 1 doc.
+145.0 push to github and do 1 doc

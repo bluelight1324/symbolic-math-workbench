@@ -89,11 +89,47 @@ static func run() -> void:
 	ckt.call("zen off shows sidebar", (not nv._zen_on) and nv._sidebar_col.visible)
 
 	print("=== 3D surface builder ===")
-	nv._color_scheme = {"src_bg": Color.WHITE, "text": Color.BLACK}
+	nv._color_scheme = {"src_bg": Color.WHITE, "text": Color.BLACK, "muted": Color.GRAY}
+	nv._density = {"chip_size": 24, "chip_offset": 4}
 	var good = nv._build_surface3d("z = sin(x)*cos(y)")
-	ckt.call("valid expr → SubViewportContainer", good is SubViewportContainer)
+	# Task 136 — now wrapped with a control bar in a VBox (was a bare SubViewportContainer).
+	ckt.call("valid expr → VBox wrapper", good is VBoxContainer)
 	var bad = nv._build_surface3d("z = @@@nonsense(")
 	ckt.call("bad expr → Label fallback", bad is Label)
+
+	print("=== task 136-143 — 3D plot structure, scroll/rotate, contour shader ===")
+	ckt.call("wrapper has controls + stack", good.get_child_count() == 2)
+	var stack3 = good.get_child(1)
+	ckt.call("stack has viewport + drag overlay", stack3.get_child_count() == 2)
+	var cont3 = stack3.get_child(0)
+	ckt.call("viewport is SubViewportContainer", cont3 is SubViewportContainer)
+	ckt.call("task137: viewport IGNOREs mouse (wheel passes)",
+		cont3.mouse_filter == Control.MOUSE_FILTER_IGNORE)
+	ckt.call("task137: stack IGNOREs mouse (wheel passes)",
+		stack3.mouse_filter == Control.MOUSE_FILTER_IGNORE)
+	ckt.call("task142: drag overlay is PASS (rotate + scroll)",
+		stack3.get_child(1).mouse_filter == Control.MOUSE_FILTER_PASS)
+	var mi3 = null
+	for c in cont3.get_child(0).get_child(0).get_children():   # vp -> world -> children
+		if c is MeshInstance3D:
+			mi3 = c
+	ckt.call("surface mesh present", mi3 != null)
+	var smat = null
+	if mi3 != null and mi3.mesh != null:
+		smat = mi3.mesh.surface_get_material(0)
+	ckt.call("task143: surface uses contour ShaderMaterial", smat is ShaderMaterial)
+	ckt.call("task143: shader code has contour math", smat != null \
+		and smat.shader != null and smat.shader.code.find("fract(s)") != -1)
+
+	print("=== task 136 — 2D plot zoom ===")
+	var pp = preload("res://scripts/plot_panel.gd").new()
+	pp.zoom_in()
+	ckt.call("zoom_in increases zoom", pp._zoom > 1.0)
+	pp.zoom_out(); pp.zoom_out()
+	ckt.call("zoom_out decreases zoom", pp._zoom < 1.0)
+	pp.zoom_reset()
+	ckt.call("zoom_reset → 1.0", is_equal_approx(pp._zoom, 1.0))
+	pp.free()
 
 	nv.free()
 	print("\n==================================================")

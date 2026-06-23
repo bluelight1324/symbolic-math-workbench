@@ -193,6 +193,10 @@ func _ready() -> void:
 		_open_named_notebook_and_run.bind("nonlinear_integral_eq.md").call_deferred()
 	if "--demo-126" in args or OS.get_cmdline_args().has("--demo-126"):
 		_open_named_notebook_and_run.bind("features_126.md").call_deferred()
+	if "--demo-133" in args or OS.get_cmdline_args().has("--demo-133"):
+		_open_named_notebook_and_run.bind("curved_spacetime.md").call_deferred()
+	if "--demo-135" in args or OS.get_cmdline_args().has("--demo-135"):
+		_open_named_notebook_and_run.bind("nonlinear_pde_curvature.md").call_deferred()
 	if "--demo-task37" in args or OS.get_cmdline_args().has("--demo-task37"):
 		_open_task37_and_run.call_deferred()
 	if "--demo-popupmenu" in args or OS.get_cmdline_args().has("--demo-popupmenu"):
@@ -610,7 +614,19 @@ func _build_ui() -> void:
 	_plot = PlotPanel.new()
 	_plot.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_plot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_plot.custom_minimum_size = Vector2(360, 200)
+	_plot.custom_minimum_size = Vector2(360, 340)   # task 136.1 — bigger
+	_plot.clip_contents = true                       # task 136.1 — clip zoom overflow
+	# Task 136.1 — zoom controls for the calculator-mode plot too.
+	var zoom_bar := HBoxContainer.new()
+	zoom_bar.add_theme_constant_override("separation", 4)
+	for z in [["−", "zoom_out"], ["+", "zoom_in"], ["⟳", "zoom_reset"]]:
+		var zb := Button.new()
+		zb.text = z[0]
+		zb.focus_mode = Control.FOCUS_NONE
+		zb.custom_minimum_size = Vector2(44, 34)
+		zb.pressed.connect(Callable(_plot, z[1]))
+		zoom_bar.add_child(zb)
+	result_body.add_child(zoom_bar)
 	result_body.add_child(_plot)
 
 	# Keypad
