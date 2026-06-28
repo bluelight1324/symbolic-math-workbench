@@ -197,6 +197,10 @@ func _ready() -> void:
 		_open_named_notebook_and_run.bind("curved_spacetime.md").call_deferred()
 	if "--demo-135" in args or OS.get_cmdline_args().has("--demo-135"):
 		_open_named_notebook_and_run.bind("nonlinear_pde_curvature.md").call_deferred()
+	if "--demo-146" in args or OS.get_cmdline_args().has("--demo-146"):
+		_open_named_notebook_and_run.bind("time_ellipsoid.md").call_deferred()
+	if "--demo-surf" in args or OS.get_cmdline_args().has("--demo-surf"):
+		_open_named_notebook_and_run.bind("parametric_surfaces.md").call_deferred()
 	if "--demo-task37" in args or OS.get_cmdline_args().has("--demo-task37"):
 		_open_task37_and_run.call_deferred()
 	if "--demo-popupmenu" in args or OS.get_cmdline_args().has("--demo-popupmenu"):

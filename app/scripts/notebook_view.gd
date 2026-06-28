@@ -74,8 +74,8 @@ var _new_name_input: LineEdit
 # Task 35 — Mathematica-style inline rendering of the notebook with plots
 # directly beneath their source. View toggle: source (CodeEdit) ↔ notebook
 # (cell stack). `_plot_samples_by_line` is keyed by the cas-plot block's
-# start-line in the parsed AST, populated when its result arrives, and used
-# by the cell builder to draw the inline plot in the right place.
+# src-hash (task 148.5 — stable across the run's text rewrite), populated when
+# its result arrives, and used by the cell builder to draw the inline plot.
 var _editor_container: Control
 var _rendered_scroll: ScrollContainer
 var _rendered_box: VBoxContainer
@@ -83,7 +83,7 @@ var _rendered_box: VBoxContainer
 # Task 58: notebook view is the primary display. Source is opt-in via the
 # "Show Source" button. (Was `false` previously — see task 35 v2 doc.)
 var _is_notebook_view: bool = true
-var _plot_samples_by_line: Dictionary = {}    # int -> PackedFloat64Array
+var _plot_samples_by_line: Dictionary = {}    # String(src-hash) -> PackedFloat64Array
 
 # Task 58 — persisted font preferences (family + size).
 var _font_size: int = FontConfig.DEFAULT_SIZE
@@ -628,6 +628,10 @@ func _dispatch_next_block() -> void:
 			# evaluator); here we just record that it rendered.
 			_finish_block_locally(entry, "3D surface rendered inline (%s)" % body, true)
 			return
+		NotebookRunner.KIND_SURFACE:
+			# Task 148.6 — parametric (u,v) surface, also built at render time.
+			_finish_block_locally(entry, "parametric surface rendered inline (%s)" % body, true)
+			return
 		_:
 			_finish_block_locally(entry, "Unknown block kind: %s" % src_kind, false)
 			return
@@ -669,7 +673,9 @@ func _on_engine_result(id: int, output: String, is_error: bool) -> void:
 		# notebook view draws the plot INLINE directly beneath the cas-plot
 		# block (see _emit_block_cell). No separate plot pane.
 		var ys := MathFormatter.parse_number_list(output)
-		_plot_samples_by_line[int(pair["source"]["start"])] = ys
+		# Task 148.5 — key by the block's src-hash (stable), not its start line,
+		# which shifts when the run rewrites the text with result blocks inserted.
+		_plot_samples_by_line[entry["src_hash"]] = ys
 		_finish_block_locally(entry, "plotted %d samples" % ys.size(), true)
 		return
 	if src_kind == NotebookRunner.KIND_TEST:
@@ -704,6 +710,7 @@ func _finish_block_locally(entry: Dictionary, payload: String, ok: bool) -> void
 		NotebookRunner.KIND_DERIVE: result_kind = NotebookRunner.KIND_DERIVE_RESULT
 		NotebookRunner.KIND_PLOT: result_kind = NotebookRunner.KIND_PLOT_RESULT
 		NotebookRunner.KIND_PLOT3D: result_kind = NotebookRunner.KIND_PLOT3D_RESULT
+		NotebookRunner.KIND_SURFACE: result_kind = NotebookRunner.KIND_SURFACE_RESULT
 		_: result_kind = "cas-result"
 	var new_body := NotebookRunner.format_result_body(result_kind, entry["src_hash"], payload, ok)
 	_run_results[pair["source"]["start"]] = {
@@ -1064,12 +1071,9 @@ func _build_surface3d(expr_src: String) -> Control:
 			(float(h[i][j]) - zmin) / zr * 2.0 - 1.0,
 			(float(j) / N - 0.5) * 4.0)
 	var colf := func(i: int, j: int) -> Color:
-		# Task 140 — height drives hue (blue valley → warm peak) AND brightness
-		# (dark valley → bright peak). The value ramp is a free depth cue that, on
-		# the new dark background, makes the surface read far more three-dimensional
-		# without any extra GPU work.
-		var t := (float(h[i][j]) - zmin) / zr
-		return Color.from_hsv(0.63 - 0.63 * t, 0.82, 0.40 + 0.55 * t)
+		# Task 148.5 (req A2) — a perceptually-uniform Viridis ramp (dark valley →
+		# bright peak) instead of the old HSV; reads truer and is colour-blind-safe.
+		return _viridis((float(h[i][j]) - zmin) / zr)
 	var stool := SurfaceTool.new()
 	stool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in range(N):
@@ -1084,11 +1088,15 @@ func _build_surface3d(expr_src: String) -> Control:
 				stool.set_color(colf.call(tri[4], tri[5])); stool.add_vertex(tri[3])
 				stool.set_color(colf.call(tri[7], tri[8])); stool.add_vertex(tri[6])
 	stool.generate_normals()
-	# Task 143 — the custom spatial shader documented (but not built) in task 139.
-	# Keeps the PBR look (roughness/metallic/rim, vertex-colour albedo) and adds
-	# anti-aliased iso-height CONTOUR LINES on the surface — the classic
-	# math-visualisation read. It's a single fragment shader, so there is NO extra
-	# render pass and effectively no GPU cost (honours task 140).
+	stool.set_material(_contour_material())   # task 143/148.6 — PBR + iso-height contours
+	var mi := MeshInstance3D.new()
+	mi.mesh = stool.commit()
+	return _plot3d_scene(mi, lo, hi, lo, hi, zmin, zmax)
+
+
+## Task 143/148.6 — the PBR + anti-aliased iso-height-contour spatial shader,
+## shared by every 3D surface kind. One fragment shader → no extra render pass.
+func _contour_material() -> ShaderMaterial:
 	var shader := Shader.new()
 	shader.code = "shader_type spatial;\n" \
 		+ "render_mode cull_disabled;\n" \
@@ -1107,17 +1115,88 @@ func _build_surface3d(expr_src: String) -> Control:
 		+ "}\n"
 	var mat := ShaderMaterial.new()
 	mat.shader = shader
-	stool.set_material(mat)
-	var mi := MeshInstance3D.new()
-	mi.mesh = stool.commit()
+	return mat
 
+
+## Task 148.6 — a parametric (u,v) surface: x=f(u,v); y=g(u,v); z=h(u,v) over
+## u,v ∈ [0, 2π]. Pure Godot (Expression sampling + SurfaceTool) — tori, spheres,
+## shells, Klein-bottle-ish shapes. Normalised to fit the standard plot box.
+func _build_parametric3d(body: String) -> Control:
+	var src := {"x": "", "y": "", "z": ""}
+	for raw in body.replace(";", "\n").split("\n"):
+		var line := raw.strip_edges()
+		var eq := line.find("=")
+		if eq <= 0:
+			continue
+		var lhs := line.substr(0, eq).strip_edges().to_lower()
+		if src.has(lhs):
+			src[lhs] = _pow_to_func(line.substr(eq + 1).strip_edges())
+	var fx := Expression.new()
+	var fy := Expression.new()
+	var fz := Expression.new()
+	if src["x"] == "" or src["y"] == "" or src["z"] == "" \
+			or fx.parse(src["x"], ["u", "v"]) != OK \
+			or fy.parse(src["y"], ["u", "v"]) != OK \
+			or fz.parse(src["z"], ["u", "v"]) != OK:
+		var lbl := Label.new()
+		lbl.text = "parametric surface — give  x = …; y = …; z = …  in u, v"
+		lbl.add_theme_color_override("font_color", _color_scheme["text"])
+		return lbl
+	var Nu := 50
+	var Nv := 50
+	var pts := []
+	var bmin := Vector3(INF, INF, INF)
+	var bmax := Vector3(-INF, -INF, -INF)
+	for iu in range(Nu + 1):
+		var row := []
+		var uu := lerpf(0.0, TAU, float(iu) / Nu)
+		for iv in range(Nv + 1):
+			var vv := lerpf(0.0, TAU, float(iv) / Nv)
+			var p := Vector3(_eval2(fx, uu, vv), _eval2(fy, uu, vv), _eval2(fz, uu, vv))
+			row.append(p)
+			bmin = Vector3(minf(bmin.x, p.x), minf(bmin.y, p.y), minf(bmin.z, p.z))
+			bmax = Vector3(maxf(bmax.x, p.x), maxf(bmax.y, p.y), maxf(bmax.z, p.z))
+		pts.append(row)
+	var center := (bmin + bmax) * 0.5
+	var ext := maxf(maxf(bmax.x - bmin.x, bmax.y - bmin.y), bmax.z - bmin.z)
+	var scl := 3.6 / maxf(0.001, ext)
+	var zmin := bmin.z
+	var zr := maxf(0.001, bmax.z - bmin.z)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for iu in range(Nu):
+		for iv in range(Nv):
+			var quad := [pts[iu][iv], pts[iu + 1][iv], pts[iu + 1][iv + 1], pts[iu][iv + 1]]
+			for tri in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]]:
+				for vert in tri:
+					var p: Vector3 = vert
+					st.set_color(_viridis((p.z - zmin) / zr))
+					st.add_vertex((p - center) * scl)
+	st.generate_normals()
+	st.set_material(_contour_material())
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	return _plot3d_scene(mi, bmin.x, bmax.x, bmin.y, bmax.y, bmin.z, bmax.z)
+
+
+func _eval2(e: Expression, u: float, v: float) -> float:
+	var r = e.execute([u, v])
+	if not (r is float or r is int):
+		return 0.0
+	var f := float(r)
+	return 0.0 if (is_nan(f) or is_inf(f)) else f
+
+
+## Task 148.6 — the shared 3D plot scene (viewport, camera, lights, environment,
+## axes, colour-bar, drag-rotate + zoom controls) wrapped around a given mesh, so
+## height-field, parametric (cas-surface) and other 3D plot kinds reuse one
+## renderer (the pluggable-mesh-source architecture from the task-148 plan).
+func _plot3d_scene(mi: MeshInstance3D, xlo: float, xhi: float, ylo: float, yhi: float, zmin: float, zmax: float) -> Control:
 	var container := SubViewportContainer.new()
 	container.stretch = true
 	container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)  # fills the stack
-	# Task 137 — don't let the 3D viewport swallow the scroll wheel; IGNORE → the
-	# wheel propagates to the page ScrollContainer so the page can scroll past the
-	# plot. Task 142 — a transparent drag-overlay above it handles left-drag
-	# rotation (it's PASS, so the wheel still reaches the page).
+	# Task 137 — IGNORE so the scroll wheel reaches the page; task 142 — a PASS
+	# drag-overlay above handles left-drag rotation while the wheel still passes.
 	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var vp := SubViewport.new()
 	vp.size = Vector2i(1120, 560)                      # task 136 — higher resolution
@@ -1142,30 +1221,24 @@ func _build_surface3d(expr_src: String) -> Control:
 	world.add_child(fill)
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	# Task 140 — a dark plot background (regardless of the notebook theme) so the
-	# lit surface, rim light and bloom stand out instead of washing against white.
-	env.background_color = Color(0.07, 0.08, 0.10)
+	env.background_color = Color(0.07, 0.08, 0.10)     # task 140 — dark plot background
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.5, 0.5, 0.55)
 	env.ambient_light_energy = 0.55
-	# Task 139 — lean on Godot's renderer: filmic tonemapping, screen-space
-	# ambient occlusion that darkens the valleys, and a soft bloom on highlights.
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC  # task 139 — filmic + SSAO + bloom
 	env.tonemap_exposure = 1.05
 	env.ssao_enabled = true
 	env.ssao_radius = 0.7
 	env.ssao_intensity = 2.2
-	env.glow_enabled = true                            # subtle highlight bloom only
+	env.glow_enabled = true
 	env.glow_intensity = 0.32
 	env.glow_bloom = 0.05
 	env.glow_hdr_threshold = 1.1
 	var we := WorldEnvironment.new()
 	we.environment = env
 	world.add_child(we)
-	# Task 142 — left-click-and-hold to rotate the surface in all planes. A
-	# transparent overlay (mouse_filter PASS) sits over the 3D viewport: it
-	# handles the left-drag (yaw on horizontal motion, pitch on vertical), while
-	# the scroll wheel still passes through to the page (task 137).
+	_add_axes_3d(world, xlo, xhi, ylo, yhi, zmin, zmax)  # task 148.5 — box + tick numbers
+	_add_colorbar_3d(world, zmin, zmax)               # task 148.6 — Viridis colour-bar
 	var stack := Control.new()
 	stack.custom_minimum_size = Vector2(0, 560)
 	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1183,8 +1256,6 @@ func _build_surface3d(expr_src: String) -> Control:
 			mi.global_rotate(Vector3.UP, deg_to_rad(-ev.relative.x * 0.4))
 			mi.global_rotate(Vector3.RIGHT, deg_to_rad(-ev.relative.y * 0.4)))
 	stack.add_child(drag)
-
-	# Task 136 — zoom dolly + reset (rotation reset folded into ⟳).
 	var wrap := VBoxContainer.new()
 	wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	wrap.add_child(_make_zoom_bar(
@@ -1193,6 +1264,89 @@ func _build_surface3d(expr_src: String) -> Control:
 		func(): mi.rotation = Vector3.ZERO; cam.position = Vector3(4.0, 3.5, 4.0); cam.look_at(Vector3.ZERO, Vector3.UP)))
 	wrap.add_child(stack)
 	return wrap
+
+
+## Task 148.6 — a vertical Viridis colour-bar to the right of the surface, with
+## the value range labelled, so the height colour-map is quantitative.
+func _add_colorbar_3d(world: Node3D, zmin: float, zmax: float) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var segs := 20
+	for k in segs:
+		var t0 := float(k) / segs
+		var t1 := float(k + 1) / segs
+		var y0 := -1.0 + t0 * 2.0
+		var y1 := -1.0 + t1 * 2.0
+		var c0 := _viridis(t0)
+		var c1 := _viridis(t1)
+		st.set_color(c0); st.add_vertex(Vector3(2.7, y0, 2))
+		st.set_color(c0); st.add_vertex(Vector3(2.95, y0, 2))
+		st.set_color(c1); st.add_vertex(Vector3(2.95, y1, 2))
+		st.set_color(c0); st.add_vertex(Vector3(2.7, y0, 2))
+		st.set_color(c1); st.add_vertex(Vector3(2.95, y1, 2))
+		st.set_color(c1); st.add_vertex(Vector3(2.7, y1, 2))
+	var cmat := StandardMaterial3D.new()
+	cmat.vertex_color_use_as_albedo = true
+	cmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cmat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	st.set_material(cmat)
+	var bar := MeshInstance3D.new()
+	bar.mesh = st.commit()
+	world.add_child(bar)
+	_axis_label(world, Vector3(3.35, 1.0, 2), String.num(zmax, 2))
+	_axis_label(world, Vector3(3.35, -1.0, 2), String.num(zmin, 2))
+
+
+## Task 148.5 (req A2) — perceptually-uniform Viridis colour-map (5-stop lerp).
+## Dark purple (low) → blue → teal → green → yellow (high); colour-blind-safe.
+func _viridis(t: float) -> Color:
+	t = clampf(t, 0.0, 1.0)
+	var stops := [
+		Color(0.267, 0.005, 0.329), Color(0.231, 0.318, 0.545),
+		Color(0.128, 0.567, 0.551), Color(0.369, 0.789, 0.383),
+		Color(0.993, 0.906, 0.144)]
+	var seg := t * 4.0
+	var i := int(floor(seg))
+	if i >= 4:
+		return stops[4]
+	return (stops[i] as Color).lerp(stops[i + 1] as Color, seg - float(i))
+
+
+## Task 148.5 (req A1) — a bounding box + axis tick numbers around the 3D surface
+## so it reads as a measured plot. The surface spans world x,z ∈ [-2,2], y ∈
+## [-1,1]; the labels map those back to the domain (lo..hi) and height (zmin..zmax).
+func _add_axes_3d(world: Node3D, xlo: float, xhi: float, ylo: float, yhi: float, zmin: float, zmax: float) -> void:
+	var im := ImmediateMesh.new()
+	var lmat := StandardMaterial3D.new()
+	lmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	lmat.albedo_color = Color(0.55, 0.60, 0.68)
+	im.surface_begin(Mesh.PRIMITIVE_LINES, lmat)
+	var c := [
+		Vector3(-2, -1, -2), Vector3(2, -1, -2), Vector3(2, -1, 2), Vector3(-2, -1, 2),
+		Vector3(-2, 1, -2), Vector3(2, 1, -2), Vector3(2, 1, 2), Vector3(-2, 1, 2)]
+	for e in [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]]:
+		im.surface_add_vertex(c[e[0]])
+		im.surface_add_vertex(c[e[1]])
+	im.surface_end()
+	var box := MeshInstance3D.new()
+	box.mesh = im
+	world.add_child(box)
+	for k in 3:
+		var f := float(k) / 2.0
+		_axis_label(world, Vector3(-2 + f * 4, -1.18, 2.2), String.num(lerpf(xlo, xhi, f), 2))   # x
+		_axis_label(world, Vector3(2.25, -1.18, 2 - f * 4), String.num(lerpf(ylo, yhi, f), 2))   # y
+		_axis_label(world, Vector3(-2.35, -1 + f * 2, 2.0), String.num(lerpf(zmin, zmax, f), 2)) # z
+
+
+func _axis_label(world: Node3D, pos: Vector3, txt: String) -> void:
+	var l := Label3D.new()
+	l.text = txt
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.modulate = Color(0.82, 0.86, 0.92)
+	l.font_size = 44
+	l.pixel_size = 0.0042
+	l.position = pos
+	world.add_child(l)
 
 
 ## Task 136 — a small "zoom −/+/⟳" control bar shared by the 2D and 3D plot cells.
@@ -1803,8 +1957,8 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	# Task 99 — plot rendered INLINE as a framed result cell directly beneath
 	# the cas-plot source block, styled + coloured to match the notebook theme.
 	if block["kind"] == NotebookRunner.KIND_PLOT \
-			and _plot_samples_by_line.has(int(block["start"])):
-		var ys: PackedFloat64Array = _plot_samples_by_line[int(block["start"])]
+			and _plot_samples_by_line.has(NotebookRunner.source_hash(block["body"], block["kind"])):
+		var ys: PackedFloat64Array = _plot_samples_by_line[NotebookRunner.source_hash(block["body"], block["kind"])]
 		var plot_cell := PanelContainer.new()
 		plot_cell.add_theme_stylebox_override("panel",
 			_make_cell_box(_color_scheme["res_bg"], _color_scheme["res_border"]))
@@ -1850,6 +2004,23 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 		v3.add_child(chip3)
 		v3.add_child(_build_surface3d(block["body"]))
 		_rendered_box.add_child(cell3d)
+		return
+
+	# Task 148.6 — parametric (u,v) surface for cas-surface blocks.
+	if block["kind"] == NotebookRunner.KIND_SURFACE:
+		var cellp := PanelContainer.new()
+		cellp.add_theme_stylebox_override("panel",
+			_make_cell_box(_color_scheme["res_bg"], _color_scheme["res_border"]))
+		var vp3 := VBoxContainer.new()
+		vp3.add_theme_constant_override("separation", int(_density["chip_offset"]))
+		cellp.add_child(vp3)
+		var chipp := Label.new()
+		chipp.text = "= parametric surface   %s" % block["body"].strip_edges().replace("\n", "  ")
+		chipp.add_theme_color_override("font_color", _color_scheme["res_chip"])
+		chipp.add_theme_font_size_override("font_size", int(_density["chip_size"]))
+		vp3.add_child(chipp)
+		vp3.add_child(_build_parametric3d(block["body"]))
+		_rendered_box.add_child(cellp)
 		return
 
 	if paired_result == null:

@@ -111,8 +111,9 @@ static func run() -> void:
 		stack3.get_child(1).mouse_filter == Control.MOUSE_FILTER_PASS)
 	var mi3 = null
 	for c in cont3.get_child(0).get_child(0).get_children():   # vp -> world -> children
-		if c is MeshInstance3D:
+		if c is MeshInstance3D and c.mesh is ArrayMesh:        # the surface (not the axes box)
 			mi3 = c
+			break
 	ckt.call("surface mesh present", mi3 != null)
 	var smat = null
 	if mi3 != null and mi3.mesh != null:
@@ -130,6 +131,47 @@ static func run() -> void:
 	pp.zoom_reset()
 	ckt.call("zoom_reset → 1.0", is_equal_approx(pp._zoom, 1.0))
 	pp.free()
+
+	print("=== task 148.5 — Viridis colormap + 2D ticks/format ===")
+	var c0: Color = nv._viridis(0.0)
+	var c1: Color = nv._viridis(1.0)
+	ckt.call("viridis(0) is dark", c0.v < 0.5)
+	ckt.call("viridis(1) is bright yellow", c1.r > 0.8 and c1.g > 0.8 and c1.b < 0.4)
+	var pp2 = preload("res://scripts/plot_panel.gd").new()
+	var ticks = pp2._nice_ticks(0.0, 10.0)
+	ckt.call("nice_ticks returns several", ticks.size() >= 3)
+	ckt.call("nice_ticks within range", ticks[0] >= 0.0 and ticks[ticks.size() - 1] <= 10.0)
+	ck.call("fmt(3.14159) → 3.14", pp2._fmt(3.14159), "3.14")
+	ck.call("fmt(0) → 0", pp2._fmt(0.0), "0")
+	pp2.free()
+
+	print("=== task 148.6 — parametric surfaces + 3D scene additions ===")
+	var psurf = nv._build_parametric3d("x = cos(u)*(2+cos(v))\ny = sin(u)*(2+cos(v))\nz = sin(v)")
+	ckt.call("parametric → VBox wrapper", psurf is VBoxContainer)
+	ckt.call("bad parametric → Label", nv._build_parametric3d("nonsense") is Label)
+	var pmi = null
+	for c in psurf.get_child(1).get_child(0).get_child(0).get_child(0).get_children():
+		if c is MeshInstance3D and c.mesh is ArrayMesh:
+			pmi = c
+			break
+	ckt.call("parametric surface mesh present", pmi != null)
+	ckt.call("parametric uses contour ShaderMaterial",
+		pmi != null and pmi.mesh.surface_get_material(0) is ShaderMaterial)
+	# the height-field 3D scene now also carries an axes box + a colour-bar
+	var hf = nv._build_surface3d("z = sin(x)*cos(y)")
+	var mesh_count := 0
+	for c in hf.get_child(1).get_child(0).get_child(0).get_child(0).get_children():
+		if c is MeshInstance3D:
+			mesh_count += 1
+	ckt.call("3D scene has surface + axes box + colour-bar (>=3 meshes)", mesh_count >= 3)
+
+	print("=== task 148.6 — cas-surface block recognition ===")
+	var sblocks = NotebookRunner.parse_blocks("```cas-surface\nx=1\ny=1\nz=1\n```")
+	ckt.call("parser recognises cas-surface",
+		sblocks.size() == 1 and sblocks[0]["kind"] == "cas-surface")
+	var spairs = NotebookRunner.pair_blocks(sblocks)
+	ckt.call("pair_blocks makes cas-surface runnable",
+		spairs.size() == 1 and spairs[0]["source"]["kind"] == "cas-surface")
 
 	nv.free()
 	print("\n==================================================")
