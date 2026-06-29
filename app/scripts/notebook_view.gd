@@ -84,6 +84,7 @@ var _rendered_box: VBoxContainer
 # "Show Source" button. (Was `false` previously — see task 35 v2 doc.)
 var _is_notebook_view: bool = true
 var _plot_samples_by_line: Dictionary = {}    # String(src-hash) -> PackedFloat64Array
+var _pending_plots: Array = []                 # task 253.0 — in-flight async plot builds
 
 # Task 58 — persisted font preferences (family + size).
 var _font_size: int = FontConfig.DEFAULT_SIZE
@@ -615,13 +616,18 @@ func _dispatch_next_block() -> void:
 			cmd = "%s; factorize(%s); trigsimp(%s, expand); trigsimp(%s, combine)" % [
 				body, body, body, body]
 		NotebookRunner.KIND_PLOT:
-			# Same sampling cmd the calculator-mode plot uses (task 7).
+			# Same sampling cmd the calculator-mode plot uses (task 7). Task 251.0 —
+			# each non-blank line is its own series, sampled into its own list so the
+			# panel can draw them as separate curves with a legend.
 			var x_min := -10.0
 			var x_max := 10.0
 			var n := 120   # task 136 — finer sampling → smoother, clearer curve
 			var step := (x_max - x_min) / float(n)
-			cmd = "on rounded; for i:=0:%d collect sub(x=(%f)+(i+0.5)*(%f), %s); off rounded" % [
-				n, x_min, step, body]
+			var parts := PackedStringArray()
+			for ex in _plot_exprs(body):
+				parts.append("for i:=0:%d collect sub(x=(%f)+(i+0.5)*(%f), %s)" % [
+					n, x_min, step, ex])
+			cmd = "on rounded; " + "; ".join(parts) + "; off rounded"
 		NotebookRunner.KIND_PLOT3D:
 			# Task 126 (req #9) — real inline 3D surface. The mesh is built at
 			# render time from the block body (sampled with Godot's Expression
@@ -631,6 +637,18 @@ func _dispatch_next_block() -> void:
 		NotebookRunner.KIND_SURFACE:
 			# Task 148.6 — parametric (u,v) surface, also built at render time.
 			_finish_block_locally(entry, "parametric surface rendered inline (%s)" % body, true)
+			return
+		NotebookRunner.KIND_ANIM:
+			_finish_block_locally(entry, "animated surface rendered inline (%s)" % body, true)
+			return
+		NotebookRunner.KIND_FIELD:
+			_finish_block_locally(entry, "vector field rendered inline (%s)" % body, true)
+			return
+		NotebookRunner.KIND_IMPLICIT:
+			_finish_block_locally(entry, "implicit surface rendered inline (%s)" % body, true)
+			return
+		NotebookRunner.KIND_DOMAIN:
+			_finish_block_locally(entry, "domain colouring rendered inline (%s)" % body, true)
 			return
 		_:
 			_finish_block_locally(entry, "Unknown block kind: %s" % src_kind, false)
@@ -669,14 +687,27 @@ func _on_engine_result(id: int, output: String, is_error: bool) -> void:
 	var ok := not is_error
 	var payload := MathFormatter.to_display(output) if ok else MathFormatter.clean_error(output)
 	if src_kind == NotebookRunner.KIND_PLOT and ok:
-		# Task 35 / 99: store the samples by block start-line so the rendered
-		# notebook view draws the plot INLINE directly beneath the cas-plot
-		# block (see _emit_block_cell). No separate plot pane.
-		var ys := MathFormatter.parse_number_list(output)
+		# Task 35 / 99: store the samples so the rendered notebook view draws the
+		# plot INLINE beneath the cas-plot block (see _emit_block_cell).
+		# Task 251.0 — one series per expression line. Each `for…collect` prints
+		# its own `{…}` list; split the output into those groups and parse each.
+		var exprs := _plot_exprs(pair["source"]["body"])
+		var groups := _extract_brace_groups(output)
+		var series: Array = []
+		if groups.size() == exprs.size() and groups.size() >= 1:
+			for gi in range(groups.size()):
+				series.append({"label": exprs[gi].strip_edges(),
+					"ys": MathFormatter.parse_number_list(groups[gi])})
+		else:
+			# Fallback — flatten everything into a single curve (back-compat).
+			series = [{"label": "", "ys": MathFormatter.parse_number_list(output)}]
 		# Task 148.5 — key by the block's src-hash (stable), not its start line,
 		# which shifts when the run rewrites the text with result blocks inserted.
-		_plot_samples_by_line[entry["src_hash"]] = ys
-		_finish_block_locally(entry, "plotted %d samples" % ys.size(), true)
+		_plot_samples_by_line[entry["src_hash"]] = series
+		var total := 0
+		for s in series:
+			total += s["ys"].size()
+		_finish_block_locally(entry, "plotted %d series, %d samples" % [series.size(), total], true)
 		return
 	if src_kind == NotebookRunner.KIND_TEST:
 		var equiv := payload.strip_edges() == "0"
@@ -711,6 +742,10 @@ func _finish_block_locally(entry: Dictionary, payload: String, ok: bool) -> void
 		NotebookRunner.KIND_PLOT: result_kind = NotebookRunner.KIND_PLOT_RESULT
 		NotebookRunner.KIND_PLOT3D: result_kind = NotebookRunner.KIND_PLOT3D_RESULT
 		NotebookRunner.KIND_SURFACE: result_kind = NotebookRunner.KIND_SURFACE_RESULT
+		NotebookRunner.KIND_ANIM: result_kind = NotebookRunner.KIND_ANIM_RESULT
+		NotebookRunner.KIND_FIELD: result_kind = NotebookRunner.KIND_FIELD_RESULT
+		NotebookRunner.KIND_IMPLICIT: result_kind = NotebookRunner.KIND_IMPLICIT_RESULT
+		NotebookRunner.KIND_DOMAIN: result_kind = NotebookRunner.KIND_DOMAIN_RESULT
 		_: result_kind = "cas-result"
 	var new_body := NotebookRunner.format_result_body(result_kind, entry["src_hash"], payload, ok)
 	_run_results[pair["source"]["start"]] = {
@@ -1187,11 +1222,413 @@ func _eval2(e: Expression, u: float, v: float) -> float:
 	return 0.0 if (is_nan(f) or is_inf(f)) else f
 
 
+## Task 149.3 — framed result cell wrapping a 3D plot control (shared by the
+## anim / field kinds).
+func _make_plot3d_cell(chip_prefix: String, body: String, content: Control) -> Control:
+	var cell := PanelContainer.new()
+	cell.add_theme_stylebox_override("panel",
+		_make_cell_box(_color_scheme["res_bg"], _color_scheme["res_border"]))
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", int(_density["chip_offset"]))
+	cell.add_child(v)
+	var chip := Label.new()
+	chip.text = "%s   %s" % [chip_prefix, body.strip_edges().replace("\n", "  ")]
+	chip.add_theme_color_override("font_color", _color_scheme["res_chip"])
+	chip.add_theme_font_size_override("font_size", int(_density["chip_size"]))
+	v.add_child(chip)
+	v.add_child(content)
+	return cell
+
+
+## Task 149.3 — an ANIMATED surface z = f(x, y, t). The `anim_surface` node
+## re-samples and rebuilds the mesh each frame with t = elapsed time. Pure Godot.
+func _build_anim3d(body: String) -> Control:
+	var e := body.strip_edges()
+	var eq := e.find("=")
+	if eq != -1 and e.substr(0, eq).strip_edges().to_lower() == "z":
+		e = e.substr(eq + 1).strip_edges()
+	e = _pow_to_func(e)
+	var expr := Expression.new()
+	if expr.parse(e, ["x", "y", "t"]) != OK:
+		var lbl := Label.new()
+		lbl.text = "animated surface — give  z = f(x, y, t)"
+		lbl.add_theme_color_override("font_color", _color_scheme["text"])
+		return lbl
+	var zmin := INF
+	var zmax := -INF
+	for i in range(13):
+		for j in range(13):
+			var z = expr.execute([lerpf(-PI, PI, float(i) / 12.0), lerpf(-PI, PI, float(j) / 12.0), 0.0])
+			var f: float = float(z) if (z is float or z is int) else 0.0
+			if not (is_nan(f) or is_inf(f)):
+				zmin = minf(zmin, f)
+				zmax = maxf(zmax, f)
+	var anim = preload("res://scripts/anim_surface.gd").new()
+	anim.expr = expr
+	anim.contour_mat = _contour_material()
+	return _plot3d_scene(anim, -PI, PI, -PI, PI, zmin, zmax)
+
+
+## Task 149.3 — a VECTOR FIELD: u = f(x,y); v = g(x,y); w = h(x,y). An arrow glyph
+## per grid point (a `MultiMeshInstance3D`, one draw call), length + colour by
+## magnitude. Pure Godot.
+func _build_field3d(body: String) -> Control:
+	var src := {"u": "", "v": "", "w": ""}
+	for raw in body.replace(";", "\n").split("\n"):
+		var line := raw.strip_edges()
+		var eq := line.find("=")
+		if eq <= 0:
+			continue
+		var lhs := line.substr(0, eq).strip_edges().to_lower()
+		if src.has(lhs):
+			src[lhs] = _pow_to_func(line.substr(eq + 1).strip_edges())
+	var fu := Expression.new()
+	var fv := Expression.new()
+	var fw := Expression.new()
+	if src["u"] == "" or src["v"] == "" or src["w"] == "" \
+			or fu.parse(src["u"], ["x", "y"]) != OK \
+			or fv.parse(src["v"], ["x", "y"]) != OK \
+			or fw.parse(src["w"], ["x", "y"]) != OK:
+		var lbl := Label.new()
+		lbl.text = "vector field — give  u = …; v = …; w = …  in x, y"
+		lbl.add_theme_color_override("font_color", _color_scheme["text"])
+		return lbl
+	var nf := 11
+	var arrow := CylinderMesh.new()
+	arrow.top_radius = 0.0
+	arrow.bottom_radius = 0.07
+	arrow.height = 1.0
+	arrow.radial_segments = 6
+	var amat := StandardMaterial3D.new()
+	amat.vertex_color_use_as_albedo = true
+	arrow.material = amat
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = arrow
+	mm.instance_count = nf * nf
+	var vecs: Array = []
+	var maxmag := 0.001
+	for i in range(nf):
+		for j in range(nf):
+			var xx := lerpf(-PI, PI, float(i) / (nf - 1))
+			var yy := lerpf(-PI, PI, float(j) / (nf - 1))
+			var vec := Vector3(_eval2(fu, xx, yy), _eval2(fw, xx, yy), _eval2(fv, xx, yy))  # (u, w, v)→(x, up, z)
+			vecs.append(vec)
+			maxmag = maxf(maxmag, vec.length())
+	var idx := 0
+	for i in range(nf):
+		for j in range(nf):
+			var vec: Vector3 = vecs[idx]
+			var mag := vec.length()
+			var alen := 0.55 * mag / maxmag + 0.02
+			var dir := vec.normalized() if mag > 1e-6 else Vector3.UP
+			var pos := Vector3((float(i) / (nf - 1) - 0.5) * 4.0, 0.0, (float(j) / (nf - 1) - 0.5) * 4.0)
+			var b := Basis(Quaternion(Vector3.UP, dir)).scaled(Vector3(0.5, alen, 0.5))
+			mm.set_instance_transform(idx, Transform3D(b, pos + dir * alen * 0.5))
+			mm.set_instance_color(idx, _viridis(mag / maxmag))
+			idx += 1
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	return _plot3d_scene(mmi, -PI, PI, -PI, PI, 0.0, maxmag)
+
+
+## Task 149.5 — an IMPLICIT surface f(x,y,z) = 0 (spheres, tori, blobs — surfaces
+## that aren't graphs). Sampled on a grid and meshed with **Surface Nets** (one
+## vertex per straddling cube, quads across sign-changing grid edges). Pure Godot;
+## the contour shader renders both sides (cull_disabled), so it reads regardless
+## of per-face winding.
+## Task 253.0 — render a heavy plot WITHOUT freezing the UI. Show a placeholder
+## immediately, run `worker` (pure data — no scene nodes) on a background thread,
+## then call `finish` on the main thread to turn that data into the real visual and
+## swap it into the cell. Shared by implicit surfaces and domain colouring.
+func _async_plot(chip_text: String, worker: Callable, finish: Callable) -> Control:
+	var cell := PanelContainer.new()
+	cell.add_theme_stylebox_override("panel",
+		_make_cell_box(_color_scheme["res_bg"], _color_scheme["res_border"]))
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", int(_density["chip_offset"]))
+	cell.add_child(v)
+	var chip := Label.new()
+	chip.text = chip_text
+	chip.add_theme_color_override("font_color", _color_scheme["res_chip"])
+	chip.add_theme_font_size_override("font_size", int(_density["chip_size"]))
+	v.add_child(chip)
+	var slot := VBoxContainer.new()
+	slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_child(slot)
+	# Detached (headless test / no live UI) → just build it now; there's no frame
+	# to keep responsive and no safe thread hand-off. In a live tree, sample on a
+	# worker and swap the result in from _process so the UI never freezes (253.0).
+	if not is_inside_tree():
+		var built = finish.call(worker.call())
+		if built != null:
+			slot.add_child(built)
+		return cell
+	var spin := Label.new()
+	spin.text = "⏳ rendering… (sampling on a background thread)"
+	spin.add_theme_color_override("font_color", _color_scheme["muted"])
+	slot.add_child(spin)
+	var box: Array = [null]                              # worker writes its result here
+	var tid := WorkerThreadPool.add_task(func(): box[0] = worker.call())
+	_pending_plots.append({"tid": tid, "slot": slot, "finish": finish, "box": box})
+	set_process(true)
+	return cell
+
+
+## Task 253.0 — apply finished async plots on the main thread, only ever from a
+## normal frame (never during shutdown). Joins each worker before reading its
+## result, then swaps the built visual into the (still-valid) cell.
+func _process(_delta: float) -> void:
+	if _pending_plots.is_empty():
+		set_process(false)
+		return
+	var still: Array = []
+	for p in _pending_plots:
+		if not WorkerThreadPool.is_task_completed(p["tid"]):
+			still.append(p)
+			continue
+		WorkerThreadPool.wait_for_task_completion(p["tid"])   # join the worker
+		var slot = p["slot"]   # untyped: a re-render may have freed it (checked next)
+		if is_instance_valid(slot) and slot.is_inside_tree():
+			for c in slot.get_children():
+				c.queue_free()
+			var visual = p["finish"].call(p["box"][0])
+			if visual != null:
+				slot.add_child(visual)
+	_pending_plots = still
+	if _pending_plots.is_empty():
+		set_process(false)
+
+
+## Task 253.0 — join any in-flight sampling threads before the view is destroyed,
+## WITHOUT applying their results (no scene-building into a half-torn-down tree).
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_EXIT_TREE or what == NOTIFICATION_PREDELETE:
+		for p in _pending_plots:
+			if not WorkerThreadPool.is_task_completed(p["tid"]):
+				WorkerThreadPool.wait_for_task_completion(p["tid"])
+		_pending_plots.clear()
+
+
+func _build_implicit3d(body: String) -> Control:
+	var e := body.strip_edges()
+	var eq := e.find("=")
+	if eq != -1:
+		var lhs := e.substr(0, eq).strip_edges()
+		var rhs := e.substr(eq + 1).strip_edges()
+		if lhs.to_lower() == "f":
+			e = rhs
+		elif rhs == "0":
+			e = lhs
+		else:
+			e = "(%s)-(%s)" % [lhs, rhs]
+	e = _pow_to_func(e)
+	var probe := Expression.new()
+	if probe.parse(e, ["x", "y", "z"]) != OK:
+		var lbl := Label.new()
+		lbl.text = "implicit surface — give  f(x, y, z) = 0"
+		lbl.add_theme_color_override("font_color", _color_scheme["text"])
+		return lbl
+	# Task 253.0 — sample + assemble the mesh off the main thread; the (cheap)
+	# commit() touches the RenderingServer, so it's done on the main thread in
+	# _implicit_finish. Swap the lit scene in when ready.
+	var src := e
+	var rad := 2.6
+	return _async_plot("= implicit surface   %s" % body.strip_edges(),
+		func(): return _implicit_surftool(src, rad, 20),
+		func(st): return _implicit_finish(st, rad))
+
+
+## Task 253.0 — the heavy Surface-Nets sampling + vertex assembly, run on a worker
+## thread. Returns a filled SurfaceTool (NOT committed — commit allocates a
+## RenderingServer mesh, which must happen on the main thread), or null if f=0
+## never crosses the sampled box. Pure CPU work — touches no scene nodes.
+func _implicit_surftool(e: String, rad: float, n: int) -> SurfaceTool:
+	var expr := Expression.new()
+	if expr.parse(e, ["x", "y", "z"]) != OK:
+		return null
+	var n1 := n + 1
+	var stp := 2.0 * rad / n
+	var sc := 4.0 / n
+	var g := PackedFloat32Array()
+	g.resize(n1 * n1 * n1)
+	var idx := 0
+	for i in range(n1):
+		for j in range(n1):
+			for k in range(n1):
+				var f = expr.execute([-rad + i * stp, -rad + j * stp, -rad + k * stp])
+				var fv: float = float(f) if (f is float or f is int) else 1.0
+				g[idx] = 1.0 if (is_nan(fv) or is_inf(fv)) else fv
+				idx += 1
+	var cube := PackedInt32Array()                 # cube linear index -> vertex index (-1 = none)
+	cube.resize(n * n * n)
+	cube.fill(-1)
+	var vpos := PackedVector3Array()
+	var co := [Vector3i(0,0,0), Vector3i(1,0,0), Vector3i(1,1,0), Vector3i(0,1,0),
+		Vector3i(0,0,1), Vector3i(1,0,1), Vector3i(1,1,1), Vector3i(0,1,1)]
+	var ce := [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]]
+	for i in range(n):
+		for j in range(n):
+			for k in range(n):
+				var base := (i * n1 + j) * n1 + k
+				var has_pos := false
+				var has_neg := false
+				for c in co:
+					if g[base + (c.x * n1 + c.y) * n1 + c.z] > 0.0:
+						has_pos = true
+					else:
+						has_neg = true
+				if not (has_pos and has_neg):
+					continue
+				var acc := Vector3.ZERO
+				var cnt := 0
+				for ed in ce:
+					var ca: Vector3i = co[ed[0]]
+					var cb: Vector3i = co[ed[1]]
+					var fa: float = g[base + (ca.x * n1 + ca.y) * n1 + ca.z]
+					var fb: float = g[base + (cb.x * n1 + cb.y) * n1 + cb.z]
+					if (fa > 0.0) == (fb > 0.0):
+						continue
+					var t: float = fa / (fa - fb)
+					acc += Vector3(ca.x + (cb.x - ca.x) * t, ca.y + (cb.y - ca.y) * t, ca.z + (cb.z - ca.z) * t)
+					cnt += 1
+				var p := (acc / float(cnt) + Vector3(i, j, k)) * sc - Vector3(2, 2, 2)
+				cube[(i * n + j) * n + k] = vpos.size()
+				vpos.append(p)
+	if vpos.is_empty():
+		return null
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# Quads across sign-changing grid edges (one per axis). cull_disabled in the
+	# contour material renders both sides, so winding need not be globally perfect.
+	for i in range(n):
+		for j in range(1, n):
+			for k in range(1, n):
+				if (g[(i * n1 + j) * n1 + k] > 0.0) == (g[((i + 1) * n1 + j) * n1 + k] > 0.0):
+					continue
+				_emit_sn_quad(st, vpos, [cube[(i * n + (j-1)) * n + (k-1)], cube[(i * n + j) * n + (k-1)],
+					cube[(i * n + j) * n + k], cube[(i * n + (j-1)) * n + k]])
+	for i in range(1, n):
+		for j in range(n):
+			for k in range(1, n):
+				if (g[(i * n1 + j) * n1 + k] > 0.0) == (g[(i * n1 + (j + 1)) * n1 + k] > 0.0):
+					continue
+				_emit_sn_quad(st, vpos, [cube[((i-1) * n + j) * n + (k-1)], cube[(i * n + j) * n + (k-1)],
+					cube[(i * n + j) * n + k], cube[((i-1) * n + j) * n + k]])
+	for i in range(1, n):
+		for j in range(1, n):
+			for k in range(n):
+				if (g[(i * n1 + j) * n1 + k] > 0.0) == (g[(i * n1 + j) * n1 + (k + 1)] > 0.0):
+					continue
+				_emit_sn_quad(st, vpos, [cube[((i-1) * n + (j-1)) * n + k], cube[(i * n + (j-1)) * n + k],
+					cube[(i * n + j) * n + k], cube[((i-1) * n + j) * n + k]])
+	st.generate_normals()
+	return st
+
+
+## Main-thread builder for an implicit surface: commit the worker's SurfaceTool to
+## a mesh (RenderingServer) and wrap it in the lit 3-D scene (or show the
+## no-crossing message). Task 253.0.
+func _implicit_finish(st: Variant, rad: float) -> Control:
+	if st == null:
+		var lbl := Label.new()
+		lbl.text = "implicit surface — f(x,y,z)=0 has no crossing in [-%.1f, %.1f]³" % [rad, rad]
+		lbl.add_theme_color_override("font_color", _color_scheme["text"])
+		return lbl
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()                       # commit on the MAIN thread
+	mi.material_override = _contour_material()
+	return _plot3d_scene(mi, -rad, rad, -rad, rad, -rad, rad)
+
+
+## Task 149.5 — emit a Surface-Nets quad (2 triangles) over 4 cube vertices, with
+## per-vertex Viridis colour by height. Skips if any cube has no vertex.
+func _emit_sn_quad(st: SurfaceTool, vpos: PackedVector3Array, ids: Array) -> void:
+	for id in ids:
+		if id < 0:
+			return
+	for oi in [0, 1, 2, 0, 2, 3]:
+		var p: Vector3 = vpos[ids[oi]]
+		st.set_color(_viridis((p.y + 2.0) / 4.0))
+		st.add_vertex(p)
+
+
+## Task 251.0 — DOMAIN COLOURING of a complex function f(z). Each pixel maps to a
+## point z in the complex plane; the colour encodes f(z): HUE = arg f (phase),
+## BRIGHTNESS rises with |f| and carries log-spaced magnitude contour rings — so
+## zeros read as dark hubs where all hues meet and poles as bright spots. Pure
+## Godot via the ComplexEval evaluator (Godot's Expression can't do complex maths).
+func _build_domain2d(body: String) -> Control:
+	var e := body.strip_edges()
+	var eq := e.find("=")
+	if eq != -1 and e.substr(0, eq).strip_edges().to_lower() == "f":
+		e = e.substr(eq + 1).strip_edges()
+	var ce = preload("res://scripts/complex_eval.gd").new()
+	if not ce.parse(e):
+		var lbl := Label.new()
+		lbl.text = "domain colouring — give  f(z)  in z   (%s)" % ce.error
+		lbl.add_theme_color_override("font_color", _color_scheme["text"])
+		return lbl
+	# Task 253.0 — colour the 280×280 grid off the main thread; swap in when ready.
+	var src := e
+	var rad := 3.0
+	return _async_plot(
+		"= domain colouring   %s   (z ∈ [−%d, %d]² · hue = arg f · brightness = |f|)" % [
+			body.strip_edges(), int(rad), int(rad)],
+		func(): return _domain_image(src, rad),
+		func(img): return _domain_visual(img))
+
+
+## Task 253.0 — colour the complex plane on a worker thread, returning a plain
+## Image (no RenderingServer / scene access). 280×280 over z ∈ [-rad, rad]².
+func _domain_image(src: String, rad: float) -> Image:
+	var ce = preload("res://scripts/complex_eval.gd").new()
+	ce.parse(src)
+	var res := 280
+	var span := 2.0 * rad / float(res - 1)
+	var img := Image.create(res, res, false, Image.FORMAT_RGB8)
+	for py in range(res):
+		var zi := rad - span * py            # image top = +i
+		for px in range(res):
+			img.set_pixel(px, py, _domain_color(ce.eval(Vector2(-rad + span * px, zi))))
+	return img
+
+
+## Main-thread builder: turn the worker's Image into a framed TextureRect with a
+## PNG-export button (task 253.0 / 252.0).
+func _domain_visual(img: Image) -> Control:
+	var rect := TextureRect.new()
+	rect.texture = ImageTexture.create_from_image(img)
+	rect.custom_minimum_size = Vector2(420, 420)
+	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	rect.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	var col := VBoxContainer.new()
+	var bar := HBoxContainer.new()
+	bar.add_child(_png_btn(rect, "domain"))
+	col.add_child(bar)
+	col.add_child(rect)
+	return col
+
+
+## Enhanced phase portrait colour for a complex value w (task 251.0).
+func _domain_color(w: Vector2) -> Color:
+	if not is_finite(w.x) or not is_finite(w.y):
+		return Color(1, 1, 1)                # poles / overflow → white
+	var m: float = w.length()
+	var hue: float = wrapf((atan2(w.y, w.x) + PI) / TAU, 0.0, 1.0)
+	var lg: float = log(m + 1e-9) / log(2.0)
+	var band: float = lg - floor(lg)         # magnitude contour rings
+	var val: float = 0.32 + 0.30 * band + 0.38 * (m / (m + 1.0))
+	return Color.from_hsv(hue, 0.95, clampf(val, 0.0, 1.0))
+
+
 ## Task 148.6 — the shared 3D plot scene (viewport, camera, lights, environment,
 ## axes, colour-bar, drag-rotate + zoom controls) wrapped around a given mesh, so
 ## height-field, parametric (cas-surface) and other 3D plot kinds reuse one
 ## renderer (the pluggable-mesh-source architecture from the task-148 plan).
-func _plot3d_scene(mi: MeshInstance3D, xlo: float, xhi: float, ylo: float, yhi: float, zmin: float, zmax: float) -> Control:
+func _plot3d_scene(mi: Node3D, xlo: float, xhi: float, ylo: float, yhi: float, zmin: float, zmax: float) -> Control:
 	var container := SubViewportContainer.new()
 	container.stretch = true
 	container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)  # fills the stack
@@ -1261,7 +1698,8 @@ func _plot3d_scene(mi: MeshInstance3D, xlo: float, xhi: float, ylo: float, yhi: 
 	wrap.add_child(_make_zoom_bar(
 		func(): cam.position *= 1.18; cam.look_at(Vector3.ZERO, Vector3.UP),   # zoom out
 		func(): cam.position *= 0.85; cam.look_at(Vector3.ZERO, Vector3.UP),   # zoom in
-		func(): mi.rotation = Vector3.ZERO; cam.position = Vector3(4.0, 3.5, 4.0); cam.look_at(Vector3.ZERO, Vector3.UP)))
+		func(): mi.rotation = Vector3.ZERO; cam.position = Vector3(4.0, 3.5, 4.0); cam.look_at(Vector3.ZERO, Vector3.UP),
+		container, "plot3d"))   # task 252.0 — export the SubViewport image
 	wrap.add_child(stack)
 	return wrap
 
@@ -1350,7 +1788,8 @@ func _axis_label(world: Node3D, pos: Vector3, txt: String) -> void:
 
 
 ## Task 136 — a small "zoom −/+/⟳" control bar shared by the 2D and 3D plot cells.
-func _make_zoom_bar(on_out: Callable, on_in: Callable, on_reset: Callable) -> HBoxContainer:
+func _make_zoom_bar(on_out: Callable, on_in: Callable, on_reset: Callable,
+		export_target: Control = null, export_hint: String = "plot") -> HBoxContainer:
 	var bar := HBoxContainer.new()
 	bar.add_theme_constant_override("separation", 4)
 	var lbl := Label.new()
@@ -1361,6 +1800,9 @@ func _make_zoom_bar(on_out: Callable, on_in: Callable, on_reset: Callable) -> HB
 	bar.add_child(_zoom_btn("−", on_out))
 	bar.add_child(_zoom_btn("+", on_in))
 	bar.add_child(_zoom_btn("⟳", on_reset))
+	# Task 252.0 — a PNG export button so a plot can leave the app.
+	if export_target != null:
+		bar.add_child(_png_btn(export_target, export_hint))
 	return bar
 
 
@@ -1373,21 +1815,190 @@ func _zoom_btn(txt: String, cb: Callable) -> Button:
 	return b
 
 
-## Task 126 — convert `a^b` to `pow(a, b)` so Godot's Expression (no `^` operator)
-## can evaluate a REDUCE-style power. Handles identifiers, numbers, function
-## calls, and one level of parentheses on each side.
+## Task 252.0 — a "⤓ PNG" button that saves the given plot node as a PNG file.
+func _png_btn(target: Control, hint: String) -> Button:
+	var b := Button.new()
+	b.text = "⤓ PNG"
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(78, 34)
+	b.pressed.connect(func(): _export_plot_png(target, hint))
+	return b
+
+
+## Task 252.0 — export a rendered plot to a PNG next to the notebook. 3-D plots and
+## domain images are saved at their native resolution straight from the
+## SubViewport / texture; a 2-D curve panel (no off-screen buffer) is captured from
+## the window, so it must be scrolled into view. Returns the saved path or "".
+func _export_plot_png(target: Control, hint: String) -> String:
+	var img: Image = null
+	var vp := _find_subviewport(target)
+	if vp != null:
+		img = vp.get_texture().get_image()                 # 3-D — native resolution
+	else:
+		var tr := _find_texrect(target)
+		if tr != null and tr.texture != null:
+			img = tr.texture.get_image()                   # domain colouring — native
+	if img == null and is_inside_tree():                   # 2-D curve — grab from window
+		await RenderingServer.frame_post_draw
+		var full := get_viewport().get_texture().get_image()
+		var gr := target.get_global_rect()
+		var r := Rect2i(Vector2i(int(gr.position.x), int(gr.position.y)),
+			Vector2i(int(gr.size.x), int(gr.size.y)))
+		r = r.intersection(Rect2i(Vector2i.ZERO, full.get_size()))
+		if r.size.x > 4 and r.size.y > 4:
+			img = full.get_region(r)
+	if img == null:
+		_status.text = "⚠ Couldn't capture the plot — scroll it fully into view and retry."
+		return ""
+	var dir := _workspace_dir if _workspace_dir != "" else OS.get_user_data_dir()
+	var stem := _open_file.get_file().get_basename() if _open_file != "" else "notebook"
+	var path := "%s/%s_%s.png" % [dir, stem, hint]
+	var k := 1
+	while FileAccess.file_exists(path):
+		path = "%s/%s_%s_%d.png" % [dir, stem, hint, k]
+		k += 1
+	if img.save_png(path) == OK:
+		_status.text = "Saved plot → %s" % path
+		return path
+	_status.text = "⚠ PNG export failed."
+	return ""
+
+
+## Task 252.0 (automation/test) — export the first rendered plot to a PNG and
+## return the saved path (or ""). Used by the --test-export integration check.
+func export_first_plot(hint: String = "auto") -> String:
+	for cell in _rendered_box.get_children():
+		if cell is Control and (_find_subviewport(cell) != null or _find_texrect(cell) != null):
+			return await _export_plot_png(cell, hint)
+	return ""
+
+
+func _find_subviewport(n: Node) -> SubViewport:
+	if n is SubViewport:
+		return n
+	for c in n.get_children():
+		var r := _find_subviewport(c)
+		if r != null:
+			return r
+	return null
+
+
+func _find_texrect(n: Node) -> TextureRect:
+	if n is TextureRect:
+		return n
+	for c in n.get_children():
+		var r := _find_texrect(c)
+		if r != null:
+			return r
+	return null
+
+
+## Task 126/149.5 — convert `a^b` to `pow(a, b)` so Godot's `Expression` (which
+## has no `^` power operator) can evaluate a REDUCE-style power. Grabs **balanced**
+## operands on each side, so `(sqrt(x*x+y*y)-1.6)^2` (nested parens) works, not
+## just one level. Left/right operand = a number, identifier, function call, or a
+## (possibly nested) parenthesised group.
 func _pow_to_func(s: String) -> String:
-	var re := RegEx.new()
-	re.compile("([A-Za-z_][A-Za-z0-9_]*\\([^()]*\\)|[A-Za-z0-9_.]+|\\([^()]*\\))\\^([A-Za-z0-9_.]+|\\([^()]*\\))")
-	var out := s
-	var m := re.search(out)
 	var guard := 0
-	while m != null and guard < 60:
+	while true:
+		var caret := s.find("^")
+		if caret == -1 or guard > 300:
+			break
 		guard += 1
-		out = out.substr(0, m.get_start()) \
-			+ "pow(%s,%s)" % [m.get_string(1), m.get_string(2)] + out.substr(m.get_end())
-		m = re.search(out)
+		# Left operand (the base): scan back from caret.
+		var l := caret - 1
+		while l >= 0 and s[l] == " ":
+			l -= 1
+		var lstart: int
+		if l >= 0 and s[l] == ")":
+			var depth := 0
+			while l >= 0:
+				if s[l] == ")":
+					depth += 1
+				elif s[l] == "(":
+					depth -= 1
+				l -= 1
+				if depth == 0:
+					break
+			lstart = l + 1
+			while lstart - 1 >= 0 and _is_ident_char(s[lstart - 1]):   # a function name
+				lstart -= 1
+		else:
+			lstart = l
+			while lstart >= 0 and _is_ident_char(s[lstart]):
+				lstart -= 1
+			lstart += 1
+		# Right operand (the exponent): scan forward from caret.
+		var rstart := caret + 1
+		while rstart < s.length() and s[rstart] == " ":
+			rstart += 1
+		var rend: int
+		if rstart < s.length() and s[rstart] == "(":
+			var depth2 := 0
+			var r := rstart
+			while r < s.length():
+				if s[r] == "(":
+					depth2 += 1
+				elif s[r] == ")":
+					depth2 -= 1
+				r += 1
+				if depth2 == 0:
+					break
+			rend = r
+		else:
+			var r := rstart
+			if r < s.length() and s[r] == "-":
+				r += 1
+			while r < s.length() and _is_ident_char(s[r]):
+				r += 1
+			rend = r
+		var base := s.substr(lstart, caret - lstart).strip_edges()
+		var ex := s.substr(rstart, rend - rstart).strip_edges()
+		if base == "" or ex == "":
+			break
+		s = s.substr(0, lstart) + "pow(" + base + "," + ex + ")" + s.substr(rend)
+	return s
+
+
+func _is_ident_char(c: String) -> bool:
+	return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") \
+		or (c >= "0" and c <= "9") or c == "_" or c == "."
+
+
+## Task 251.0 — the expression(s) of a cas-plot block: one per non-blank, non-`#`
+## line (so a multi-line block draws a curve per line). Falls back to the whole
+## body when no usable line is found, preserving the original single-curve behaviour.
+func _plot_exprs(body: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	for raw in body.split("\n"):
+		var line := raw.strip_edges()
+		if line == "" or line.begins_with("#"):
+			continue
+		out.append(line)
+	if out.is_empty():
+		out.append(body.strip_edges())
 	return out
+
+
+## Task 251.0 — split engine output into top-level `{…}` groups (one per sampled
+## series). Balanced-brace scan so a long, line-wrapped list stays in one group.
+func _extract_brace_groups(s: String) -> Array:
+	var groups: Array = []
+	var depth := 0
+	var start := -1
+	for i in range(s.length()):
+		var c := s[i]
+		if c == "{":
+			if depth == 0:
+				start = i
+			depth += 1
+		elif c == "}":
+			if depth > 0:
+				depth -= 1
+				if depth == 0 and start != -1:
+					groups.append(s.substr(start, i - start + 1))
+					start = -1
+	return groups
 
 
 ## Plot x-range (the sampling grid the cas-plot command uses).
@@ -1958,7 +2569,10 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	# the cas-plot source block, styled + coloured to match the notebook theme.
 	if block["kind"] == NotebookRunner.KIND_PLOT \
 			and _plot_samples_by_line.has(NotebookRunner.source_hash(block["body"], block["kind"])):
-		var ys: PackedFloat64Array = _plot_samples_by_line[NotebookRunner.source_hash(block["body"], block["kind"])]
+		var series: Array = _plot_samples_by_line[NotebookRunner.source_hash(block["body"], block["kind"])]
+		var total := 0
+		for s in series:
+			total += int(s["ys"].size())
 		var plot_cell := PanelContainer.new()
 		plot_cell.add_theme_stylebox_override("panel",
 			_make_cell_box(_color_scheme["res_bg"], _color_scheme["res_border"]))
@@ -1966,8 +2580,10 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 		pv.add_theme_constant_override("separation", int(_density["chip_offset"]))
 		plot_cell.add_child(pv)
 		var plot_chip := Label.new()
-		plot_chip.text = "= plot   %s   (%d samples · x ∈ [%d, %d])" % [
-			block["body"].strip_edges(), ys.size(), int(X_MIN), int(X_MAX)]
+		# Task 251.0 — show the curve count when there's more than one series.
+		var count_txt := ("%d curves · " % series.size()) if series.size() > 1 else ""
+		plot_chip.text = "= plot   %s   (%s%d samples · x ∈ [%d, %d])" % [
+			block["body"].strip_edges().replace("\n", " ; "), count_txt, total, int(X_MIN), int(X_MAX)]
 		plot_chip.add_theme_color_override("font_color", _color_scheme["res_chip"])
 		plot_chip.add_theme_font_size_override("font_size", int(_density["chip_size"]))
 		pv.add_child(plot_chip)
@@ -1981,10 +2597,15 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 				_color_scheme["muted"],                                    # axes
 				_color_scheme["muted"].lerp(_color_scheme["src_bg"], 0.6), # grid
 				_color_scheme["src_border"])                               # curve
-		# Task 136 — zoom controls for the 2D plot.
-		pv.add_child(_make_zoom_bar(plot_panel.zoom_out, plot_panel.zoom_in, plot_panel.zoom_reset))
+		# Task 136 — zoom controls for the 2D plot; task 252.0 — PNG export.
+		pv.add_child(_make_zoom_bar(plot_panel.zoom_out, plot_panel.zoom_in, plot_panel.zoom_reset,
+			plot_panel, "plot2d"))
 		pv.add_child(plot_panel)
-		if plot_panel.has_method("set_samples"):
+		# Task 251.0 — single expression → set_samples (no legend); many → set_series.
+		if series.size() > 1:
+			plot_panel.set_series(X_MIN, X_MAX, series)
+		else:
+			var ys: PackedFloat64Array = series[0]["ys"] if series.size() == 1 else PackedFloat64Array()
 			plot_panel.set_samples(X_MIN, X_MAX, ys)
 		_rendered_box.add_child(plot_cell)
 		return
@@ -2021,6 +2642,21 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 		vp3.add_child(chipp)
 		vp3.add_child(_build_parametric3d(block["body"]))
 		_rendered_box.add_child(cellp)
+		return
+
+	# Task 149.3 — animated surface and vector field cells.
+	if block["kind"] == NotebookRunner.KIND_ANIM:
+		_rendered_box.add_child(_make_plot3d_cell("= animated surface", block["body"], _build_anim3d(block["body"])))
+		return
+	if block["kind"] == NotebookRunner.KIND_FIELD:
+		_rendered_box.add_child(_make_plot3d_cell("= vector field", block["body"], _build_field3d(block["body"])))
+		return
+	if block["kind"] == NotebookRunner.KIND_IMPLICIT:
+		# Task 253.0 — _build_implicit3d now returns its own framed (async) cell.
+		_rendered_box.add_child(_build_implicit3d(block["body"]))
+		return
+	if block["kind"] == NotebookRunner.KIND_DOMAIN:
+		_rendered_box.add_child(_build_domain2d(block["body"]))
 		return
 
 	if paired_result == null:

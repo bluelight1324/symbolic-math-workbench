@@ -201,6 +201,16 @@ func _ready() -> void:
 		_open_named_notebook_and_run.bind("time_ellipsoid.md").call_deferred()
 	if "--demo-surf" in args or OS.get_cmdline_args().has("--demo-surf"):
 		_open_named_notebook_and_run.bind("parametric_surfaces.md").call_deferred()
+	if "--demo-dyn" in args or OS.get_cmdline_args().has("--demo-dyn"):
+		_open_named_notebook_and_run.bind("dynamic_plots.md").call_deferred()
+	if "--demo-impl" in args or OS.get_cmdline_args().has("--demo-impl"):
+		_open_named_notebook_and_run.bind("implicit_surfaces.md").call_deferred()
+	if "--demo-multi" in args or OS.get_cmdline_args().has("--demo-multi"):
+		_open_named_notebook_and_run.bind("multi_series.md").call_deferred()
+	if "--demo-domain" in args or OS.get_cmdline_args().has("--demo-domain"):
+		_open_named_notebook_and_run.bind("domain_coloring.md").call_deferred()
+	if "--test-export" in args or OS.get_cmdline_args().has("--test-export"):
+		_run_export_test.call_deferred()
 	if "--demo-task37" in args or OS.get_cmdline_args().has("--demo-task37"):
 		_open_task37_and_run.call_deferred()
 	if "--demo-popupmenu" in args or OS.get_cmdline_args().has("--demo-popupmenu"):
@@ -330,6 +340,31 @@ func _open_named_notebook_and_run(filename: String) -> void:
 		tries += 1
 	await get_tree().create_timer(0.3).timeout
 	_notebook._on_force_run()
+
+
+## Task 252.0 / 253.1 — integration check for PNG export: export both a 3-D plot
+## (SubViewport branch) and a domain image (TextureRect branch), reporting each
+## path + size. Exits when done.
+func _run_export_test() -> void:
+	await _open_named_notebook_and_run("implicit_surfaces.md")
+	await get_tree().create_timer(6.0).timeout    # let the surface mesh + render settle
+	_report_export(await _notebook.export_first_plot("test3d"))
+	await _open_named_notebook_and_run("domain_coloring.md")
+	await get_tree().create_timer(6.0).timeout    # let the domain image build + swap in
+	_report_export(await _notebook.export_first_plot("testdomain"))
+	await get_tree().create_timer(0.3).timeout
+	get_tree().quit()
+
+
+func _report_export(path: String) -> void:
+	if path != "" and FileAccess.file_exists(path):
+		var img := Image.load_from_file(path)
+		if img != null:
+			print("EXPORT_RESULT ok %dx%d %s" % [img.get_width(), img.get_height(), path])
+		else:
+			print("EXPORT_RESULT bad-image %s" % path)
+	else:
+		print("EXPORT_RESULT FAILED path='%s'" % path)
 
 
 func _open_plot_notebook_and_run() -> void:

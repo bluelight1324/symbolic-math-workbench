@@ -1,10 +1,12 @@
 extends Control
-## Plot panel — custom 2D drawing of a sampled function (task-2 §4, task-4 §5).
-## Receives y-samples over a fixed x-range and draws axes + an antialiased curve.
+## Plot panel — custom 2D drawing of sampled function(s) (task-2 §4, task-4 §5).
+## Receives y-samples over a fixed x-range and draws axes + antialiased curves.
+## Task 251.0 — supports MULTIPLE series (one curve per expression) + a legend.
 
 var _x_min := -10.0
 var _x_max := 10.0
-var _samples := PackedFloat64Array()
+var _samples := PackedFloat64Array()        # single-series path (back-compat)
+var _series: Array = []                       # task 251.0 — [{ys, label}, …] multi-series
 var _axis_color := Color(0.5, 0.55, 0.62)
 var _grid_color := Color(0.27, 0.30, 0.36)
 var _curve_color := Color(0.36, 0.74, 1.0)
@@ -12,6 +14,16 @@ var _bg := Color(0.11, 0.12, 0.15)
 var _zoom := 1.0   # task 136 — magnification around the panel centre
 var _hover_px := -1.0      # task 148.5 — cursor x for the hover crosshair
 var _hover_active := false
+
+# Task 251.0 — distinct, theme-independent colours for multi-series curves.
+const SERIES_PALETTE := [
+	Color(0.22, 0.55, 1.00),   # blue
+	Color(0.95, 0.42, 0.24),   # orange-red
+	Color(0.28, 0.74, 0.36),   # green
+	Color(0.76, 0.42, 0.86),   # purple
+	Color(0.95, 0.72, 0.16),   # amber
+	Color(0.22, 0.72, 0.70),   # teal
+]
 
 
 func _ready() -> void:
@@ -53,6 +65,16 @@ func set_samples(x_min: float, x_max: float, ys: PackedFloat64Array) -> void:
 	_x_min = x_min
 	_x_max = x_max
 	_samples = ys
+	_series = []
+	queue_redraw()
+
+
+## Task 251.0 — set several curves at once. `series` is [{label:String, ys:Packed…}].
+func set_series(x_min: float, x_max: float, series: Array) -> void:
+	_x_min = x_min
+	_x_max = x_max
+	_series = series
+	_samples = PackedFloat64Array()
 	queue_redraw()
 
 
@@ -69,7 +91,12 @@ func set_theme_colors(bg: Color, axis: Color, grid: Color, curve: Color) -> void
 
 func clear_plot() -> void:
 	_samples = PackedFloat64Array()
+	_series = []
 	queue_redraw()
+
+
+func _series_color(i: int) -> Color:
+	return SERIES_PALETTE[i % SERIES_PALETTE.size()]
 
 
 func _draw() -> void:
@@ -77,17 +104,24 @@ func _draw() -> void:
 	var h := size.y
 	draw_rect(Rect2(Vector2.ZERO, size), _bg)
 
-	# Keep the panel clean until there's something to plot (task 26).
-	if _samples.is_empty():
-		return
+	# One code path: the single-sample case is just a one-element, unlabelled series.
+	var multi := not _series.is_empty()
+	var series: Array = _series
+	if not multi:
+		if _samples.is_empty():
+			return   # keep the panel clean until there's something to plot (task 26)
+		series = [{"ys": _samples, "label": ""}]
 
-	# y-range from the data.
-	var y_min := _samples[0]
-	var y_max := _samples[0]
-	for v in _samples:
-		if is_finite(v):
-			y_min = minf(y_min, v)
-			y_max = maxf(y_max, v)
+	# Combined y-range across every series.
+	var y_min := INF
+	var y_max := -INF
+	for s in series:
+		for v in s["ys"]:
+			if is_finite(v):
+				y_min = minf(y_min, v)
+				y_max = maxf(y_max, v)
+	if not is_finite(y_min) or not is_finite(y_max):
+		return
 	if is_equal_approx(y_min, y_max):
 		y_min -= 1.0
 		y_max += 1.0
@@ -109,19 +143,23 @@ func _draw() -> void:
 	if _x_min < 0.0 and _x_max > 0.0:
 		var ax := (0.0 - _x_min) / (_x_max - _x_min) * w
 		draw_line(Vector2(ax, 0), Vector2(ax, h), _axis_color, 3.0)
-	if _samples.size() >= 2:
+	for si in range(series.size()):
+		var ys: PackedFloat64Array = series[si]["ys"]
+		if ys.size() < 2:
+			continue
+		var col: Color = _series_color(si) if multi else _curve_color
 		var pts := PackedVector2Array()
-		var n := _samples.size()
+		var n := ys.size()
 		for i in range(n):
-			var v: float = _samples[i]
+			var v: float = ys[i]
 			if not is_finite(v):
 				continue   # skip discontinuities (task-4 §5)
 			pts.append(Vector2(float(i) / float(n - 1) * w,
 				h - (v - y_min) / (y_max - y_min) * h))
 		if pts.size() >= 2:
-			draw_polyline(pts, _curve_color, 3.5, true)   # task 136 — bolder curve
+			draw_polyline(pts, col, 3.5, true)   # task 136 — bolder curve
 
-	# --- screen-space overlays: axis tick numbers + hover (task 148.5) ---
+	# --- screen-space overlays: axis tick numbers + legend + hover (task 148.5) ---
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var font := ThemeDB.fallback_font
 	var fs := 13
@@ -135,19 +173,73 @@ func _draw() -> void:
 		if spy >= float(fs) and spy <= h:
 			draw_string(font, Vector2(3, spy - 2), _fmt(tv),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, _axis_color)
-	if _hover_active and _samples.size() >= 2:
-		var n2 := _samples.size()
-		var base_px := (_hover_px - w * 0.5 * (1.0 - _zoom)) / _zoom
-		var idx := clampi(int(round(base_px / w * (n2 - 1))), 0, n2 - 1)
-		var dv: float = _samples[idx]
-		if is_finite(dv):
-			var dx := lerpf(_x_min, _x_max, float(idx) / float(n2 - 1))
-			draw_line(Vector2(_hover_px, 0), Vector2(_hover_px, h),
-				_axis_color * Color(1, 1, 1, 0.7), 1.0)
-			var spy2 := h * 0.5 * (1.0 - _zoom) + _zoom * (h - (dv - y_min) / (y_max - y_min) * h)
-			draw_circle(Vector2(_hover_px, spy2), 4.0, _curve_color)
+
+	# Task 251.0 — legend (only when series carry labels).
+	if multi:
+		_draw_legend(series, font, fs, w)
+
+	# Hover crosshair + per-series read-out.
+	if _hover_active:
+		_draw_hover(series, multi, y_min, y_max, font, fs, w, h)
+
+
+## Task 251.0 — draw a legend box (top-right) with a colour swatch + label per series.
+func _draw_legend(series: Array, font: FontFile, fs: int, w: float) -> void:
+	var labelled := false
+	for s in series:
+		if String(s["label"]) != "":
+			labelled = true
+	if not labelled:
+		return
+	var row_h := fs + 6
+	var box_w := 150.0
+	var box_h := row_h * series.size() + 8
+	# Top-left, inset past the y-axis tick numbers — always on-screen even when a
+	# long chip widens the notebook column beyond the window (task 251.0).
+	var ox := 46.0
+	var oy := 8.0
+	# Contrasting fill (tone the bg toward the axis colour) so the box is visible
+	# on a light *or* dark theme, with a clear border.
+	draw_rect(Rect2(ox, oy, box_w, box_h), _bg.lerp(_axis_color, 0.16))
+	draw_rect(Rect2(ox, oy, box_w, box_h), _axis_color, false, 1.5)
+	for si in range(series.size()):
+		var ry := oy + 4 + si * row_h
+		draw_rect(Rect2(ox + 6, ry + 3, 16, fs - 4), _series_color(si))
+		var lbl := String(series[si]["label"])
+		if lbl.length() > 16:
+			lbl = lbl.substr(0, 15) + "…"
+		draw_string(font, Vector2(ox + 28, ry + fs), lbl,
+			HORIZONTAL_ALIGNMENT_LEFT, box_w - 32, fs, _axis_color)
+
+
+## Hover read-out: crosshair + a dot on each series at the cursor's x.
+func _draw_hover(series: Array, multi: bool, y_min: float, y_max: float,
+		font: FontFile, fs: int, w: float, h: float) -> void:
+	var first: PackedFloat64Array = series[0]["ys"]
+	if first.size() < 2:
+		return
+	var n2 := first.size()
+	var base_px := (_hover_px - w * 0.5 * (1.0 - _zoom)) / _zoom
+	var idx := clampi(int(round(base_px / w * (n2 - 1))), 0, n2 - 1)
+	var dx := lerpf(_x_min, _x_max, float(idx) / float(n2 - 1))
+	draw_line(Vector2(_hover_px, 0), Vector2(_hover_px, h),
+		_axis_color * Color(1, 1, 1, 0.7), 1.0)
+	for si in range(series.size()):
+		var ys: PackedFloat64Array = series[si]["ys"]
+		if idx >= ys.size():
+			continue
+		var dv: float = ys[idx]
+		if not is_finite(dv):
+			continue
+		var col: Color = _series_color(si) if multi else _curve_color
+		var spy := h * 0.5 * (1.0 - _zoom) + _zoom * (h - (dv - y_min) / (y_max - y_min) * h)
+		draw_circle(Vector2(_hover_px, spy), 4.0, col)
+		if not multi:
 			draw_string(font, Vector2(clampf(_hover_px + 6, 0, w - 96), 16),
-				"(%s, %s)" % [_fmt(dx), _fmt(dv)], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, _curve_color)
+				"(%s, %s)" % [_fmt(dx), _fmt(dv)], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
+	if multi:
+		draw_string(font, Vector2(clampf(_hover_px + 6, 0, w - 70), 16),
+			"x = %s" % _fmt(dx), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, _axis_color)
 
 
 ## Task 148.5 (req A1) — ~6 "nice" tick values (1·2·5 stepping) in [lo, hi].

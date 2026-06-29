@@ -18,6 +18,14 @@ const KIND_PLOT3D := "cas-plot3d"
 const KIND_PLOT3D_RESULT := "cas-plot3d-result"
 const KIND_SURFACE := "cas-surface"               # task 148.6 — parametric (u,v) surface
 const KIND_SURFACE_RESULT := "cas-surface-result"
+const KIND_ANIM := "cas-anim"                     # task 149.3 — animated z=f(x,y,t)
+const KIND_ANIM_RESULT := "cas-anim-result"
+const KIND_FIELD := "cas-field"                   # task 149.3 — vector field
+const KIND_FIELD_RESULT := "cas-field-result"
+const KIND_IMPLICIT := "cas-implicit"             # task 149.5 — implicit f(x,y,z)=0
+const KIND_IMPLICIT_RESULT := "cas-implicit-result"
+const KIND_DOMAIN := "cas-domain"                 # task 251.0 — complex domain colouring
+const KIND_DOMAIN_RESULT := "cas-domain-result"
 
 const ENGINE_TAG := "csl-6547"   # bundled REDUCE build (see math_engine.gd)
 
@@ -59,7 +67,9 @@ static func _fence_kind(line: String) -> String:
 	match rest:
 		KIND_CAS, KIND_RESULT, KIND_TEST, KIND_TEST_RESULT, \
 		KIND_DERIVE, KIND_DERIVE_RESULT, KIND_PLOT, KIND_PLOT_RESULT, \
-		KIND_PLOT3D, KIND_PLOT3D_RESULT, KIND_SURFACE, KIND_SURFACE_RESULT:
+		KIND_PLOT3D, KIND_PLOT3D_RESULT, KIND_SURFACE, KIND_SURFACE_RESULT, \
+		KIND_ANIM, KIND_ANIM_RESULT, KIND_FIELD, KIND_FIELD_RESULT, \
+		KIND_IMPLICIT, KIND_IMPLICIT_RESULT, KIND_DOMAIN, KIND_DOMAIN_RESULT:
 			return rest
 		_:
 			return ""
@@ -94,6 +104,10 @@ static func pair_blocks(blocks: Array) -> Array:
 		KIND_PLOT: KIND_PLOT_RESULT,
 		KIND_PLOT3D: KIND_PLOT3D_RESULT,
 		KIND_SURFACE: KIND_SURFACE_RESULT,
+		KIND_ANIM: KIND_ANIM_RESULT,
+		KIND_FIELD: KIND_FIELD_RESULT,
+		KIND_IMPLICIT: KIND_IMPLICIT_RESULT,
+		KIND_DOMAIN: KIND_DOMAIN_RESULT,
 	}
 	var pairs: Array = []
 	var i := 0
