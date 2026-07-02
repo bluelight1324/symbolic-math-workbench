@@ -452,7 +452,93 @@ func _on_save() -> void:
 	_status.text = "Saved %s" % _open_file
 
 
+## Task 256 — give a dialog Window the app's modern look: a rounded, shadowed
+## panel in the ACTIVE colour scheme, pill buttons in the accent colour, rounded
+## inputs / lists with a focus ring, and the app font. Re-applied on each open so
+## the dialogs always match the current theme. Works for FileDialog / AcceptDialog
+## / ConfirmationDialog (all Window subclasses) without per-dialog wiring.
+func _apply_dialog_style(win: Window) -> void:
+	var sc := _color_scheme
+	var radius := int(_density.get("corner_radius", 8))
+	var accent: Color = sc["res_chip"]
+	var th := Theme.new()
+	if _font_resource:
+		th.default_font = _font_resource
+	th.default_font_size = maxi(15, _font_size - 8)
+
+	# Dialog body + (embedded) window frame.
+	var body := StyleBoxFlat.new()
+	body.bg_color = sc["bg"]
+	body.set_corner_radius_all(radius + 4)
+	body.set_content_margin_all(18)
+	body.border_color = sc["res_border"]
+	body.set_border_width_all(1)
+	body.shadow_color = Color(0, 0, 0, 0.45)
+	body.shadow_size = 14
+	for t in ["AcceptDialog", "ConfirmationDialog", "FileDialog", "PopupPanel"]:
+		th.set_stylebox("panel", t, body)
+	th.set_stylebox("embedded_border", "Window", body)
+	th.set_stylebox("embedded_unfocused_border", "Window", body)
+	th.set_color("title_color", "Window", sc["text"])
+	th.set_font_size("title_font_size", "Window", maxi(16, _font_size - 6))
+	if _font_resource:
+		th.set_font("title_font", "Window", _font_resource)
+
+	# Pill buttons in the accent colour.
+	var mk_btn := func(fill: Color) -> StyleBoxFlat:
+		var b := StyleBoxFlat.new()
+		b.bg_color = fill
+		b.set_corner_radius_all(radius)
+		b.content_margin_top = 8
+		b.content_margin_bottom = 8
+		b.content_margin_left = 18
+		b.content_margin_right = 18
+		return b
+	th.set_stylebox("normal", "Button", mk_btn.call(accent.darkened(0.12)))
+	th.set_stylebox("hover", "Button", mk_btn.call(accent))
+	th.set_stylebox("pressed", "Button", mk_btn.call(accent.darkened(0.28)))
+	th.set_stylebox("focus", "Button", StyleBoxEmpty.new())
+	th.set_color("font_color", "Button", Color.WHITE)
+	th.set_color("font_hover_color", "Button", Color.WHITE)
+	th.set_color("font_pressed_color", "Button", Color.WHITE)
+
+	# Rounded inputs with a focus ring.
+	var inp := StyleBoxFlat.new()
+	inp.bg_color = sc["src_bg"]
+	inp.set_corner_radius_all(radius)
+	inp.set_content_margin_all(9)
+	inp.border_color = sc["src_border"]
+	inp.set_border_width_all(1)
+	var inpf: StyleBoxFlat = inp.duplicate()
+	inpf.border_color = accent
+	inpf.set_border_width_all(2)
+	th.set_stylebox("normal", "LineEdit", inp)
+	th.set_stylebox("focus", "LineEdit", inpf)
+	th.set_color("font_color", "LineEdit", sc["text"])
+	th.set_color("font_placeholder_color", "LineEdit", sc["muted"])
+	th.set_color("caret_color", "LineEdit", accent)
+
+	# Result/file lists (ItemList in Search, Tree in the FileDialog).
+	var listbg := StyleBoxFlat.new()
+	listbg.bg_color = sc["src_bg"]
+	listbg.set_corner_radius_all(radius)
+	listbg.set_content_margin_all(6)
+	var sel := StyleBoxFlat.new()
+	sel.bg_color = accent
+	sel.set_corner_radius_all(maxi(2, radius - 2))
+	for t in ["ItemList", "Tree"]:
+		th.set_stylebox("panel", t, listbg)
+		th.set_stylebox("selected", t, sel)
+		th.set_stylebox("selected_focus", t, sel)
+		th.set_color("font_color", t, sc["text"])
+		th.set_color("font_selected_color", t, Color.WHITE)
+	th.set_color("font_color", "Label", sc["text"])
+
+	win.theme = th
+
+
 func _on_open_workspace() -> void:
+	_apply_dialog_style(_file_dialog)
 	_file_dialog.popup_centered_ratio(0.6)
 
 
@@ -465,6 +551,7 @@ func _on_new_note() -> void:
 		_status.text = "Open a workspace first"
 		return
 	_new_name_input.text = ""
+	_apply_dialog_style(_new_name_dialog)
 	_new_name_dialog.popup_centered()
 	_new_name_input.grab_focus()
 
@@ -899,6 +986,7 @@ func _on_search_workspace() -> void:
 	_search_input.text = ""
 	_search_results.clear()
 	_search_hits.clear()
+	_apply_dialog_style(_search_dialog)
 	_search_dialog.popup_centered()
 	_search_input.grab_focus()
 
@@ -2089,6 +2177,12 @@ func _build_menubar_popup() -> void:
 	_popup.add_check_item("Shadows", _ID_SHADOWS)
 	_popup.add_check_item("Animations", _ID_ANIMATIONS)
 	_popup.id_pressed.connect(_on_menu_id_pressed)
+	# Task 255 — refresh the radio/check marks every time the menu opens, computed
+	# OUTSIDE any click handler. Previously `_sync_menu_checks()` ran synchronously
+	# inside `id_pressed` and `_check_only` mutated the (sub)menu's checked items
+	# mid-signal — a Godot footgun that desynced the PopupMenu so the FIRST font
+	# change worked but every SUBSEQUENT submenu selection stopped firing.
+	_popup.about_to_popup.connect(_sync_menu_checks)
 
 
 ## Sync the radio-check marks in each submenu with the current settings.
@@ -2152,25 +2246,25 @@ func _on_menu_id_pressed(id: int) -> void:
 		_shadows_on = not _shadows_on
 		StyleConfig.save(_density_key, _shadows_on, _animations_on)
 		_apply_visual_style()
-		_sync_menu_checks()
+		_sync_menu_checks.call_deferred()
 	elif id == _ID_ANIMATIONS:
 		_animations_on = not _animations_on
 		StyleConfig.save(_density_key, _shadows_on, _animations_on)
-		_sync_menu_checks()
+		_sync_menu_checks.call_deferred()
 	elif id >= _ID_FONT_BASE and id < _ID_SIZE_BASE:
 		_on_font_family_changed(id - _ID_FONT_BASE)
-		_sync_menu_checks()
+		_sync_menu_checks.call_deferred()
 	elif id >= _ID_SIZE_BASE and id < _ID_THEME_BASE:
 		_font_size = int(_SIZE_OPTIONS[id - _ID_SIZE_BASE])
 		FontConfig.save_pair(_font_size, _font_family)
 		_apply_font()
-		_sync_menu_checks()
+		_sync_menu_checks.call_deferred()
 	elif id >= _ID_THEME_BASE and id < _ID_STYLE_BASE:
 		_on_color_changed(id - _ID_THEME_BASE)
-		_sync_menu_checks()
+		_sync_menu_checks.call_deferred()
 	elif id >= _ID_STYLE_BASE and id < _ID_SHADOWS:
 		_on_density_changed(id - _ID_STYLE_BASE)
-		_sync_menu_checks()
+		_sync_menu_checks.call_deferred()
 	elif id >= _ID_LOOKS_BASE and id < _ID_LOOKS_BASE + 100:
 		_apply_look(LooksConfig.ordered_keys()[id - _ID_LOOKS_BASE])
 
@@ -2196,7 +2290,7 @@ func _apply_look(key: String) -> void:
 	FontConfig.save_pair(_font_size, _font_family)
 	_apply_font()
 	_apply_visual_style()
-	_sync_menu_checks()
+	_sync_menu_checks.call_deferred()
 	_status.text = "Look applied: %s" % look["label"]
 
 
@@ -2677,13 +2771,22 @@ func _emit_block_cell(block: Dictionary, paired_result) -> void:
 	res_kind_lbl.add_theme_font_size_override("font_size", int(_density["chip_size"]))
 	res_v.add_child(res_kind_lbl)
 	var res_text := RichTextLabel.new()
-	res_text.bbcode_enabled = false
+	# Task 265/266 — BBCode on so matrices render as grids; task-266 custom effects
+	# provide the [sup]/[sub] tags Godot 4.6 lacks so multi-char scripts really raise.
+	res_text.bbcode_enabled = true
+	res_text.install_effect(preload("res://scripts/rt_superscript.gd").new())
+	res_text.install_effect(preload("res://scripts/rt_subscript.gd").new())
 	res_text.fit_content = true
 	res_text.scroll_active = false
 	res_text.mouse_filter = Control.MOUSE_FILTER_PASS   # task 110 — dblclick to edit
-	res_text.text = NotebookRunner.payload_only(paired_result["body"])
+	res_text.text = MathFormatter.to_bbcode(NotebookRunner.payload_only(paired_result["body"]))
 	res_text.add_theme_color_override("default_color", _color_scheme["text"])
 	_font_apply(res_text)
+	# Task 270 — render the mathematics ITSELF in the bundled STIX Two Math (a real
+	# math font, task 268) as the PRIMARY font, so variables, numbers, operators and
+	# symbols all share one coherent math face. Prose, source and the editor keep the
+	# user's chosen family; _font_apply's size override above is preserved.
+	res_text.add_theme_font_override("normal_font", FontConfig.math_font())
 	res_v.add_child(res_text)
 	_rendered_box.add_child(res_panel)
 

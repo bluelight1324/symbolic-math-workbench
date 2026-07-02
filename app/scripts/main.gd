@@ -209,6 +209,10 @@ func _ready() -> void:
 		_open_named_notebook_and_run.bind("multi_series.md").call_deferred()
 	if "--demo-domain" in args or OS.get_cmdline_args().has("--demo-domain"):
 		_open_named_notebook_and_run.bind("domain_coloring.md").call_deferred()
+	if "--demo-264" in args or OS.get_cmdline_args().has("--demo-264"):
+		_open_named_notebook_and_run.bind("task264_symbols.md").call_deferred()
+	if "--demo-272" in args or OS.get_cmdline_args().has("--demo-272"):
+		_open_named_notebook_and_run.bind("stix_showcase.md").call_deferred()
 	if "--test-export" in args or OS.get_cmdline_args().has("--test-export"):
 		_run_export_test.call_deferred()
 	if "--demo-task37" in args or OS.get_cmdline_args().has("--demo-task37"):

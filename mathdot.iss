@@ -3,7 +3,7 @@
 ; Supports Windows 7 SP1 and later
 
 #define MyAppName "mathdot"
-#define MyAppVersion "1.2.2"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "bluelight1324"
 #define MyAppURL "https://github.com/bluelight1324/symbolic-math-workbench"
 #define MyAppExeName "Godot.exe"
@@ -54,6 +54,9 @@ Source: "{#SourceDir}\scripts\*"; DestDir: "{app}\scripts"; Components: app; Fla
 Source: "{#SourceDir}\scenes\*"; DestDir: "{app}\scenes"; Components: app; Flags: ignoreversion recursesubdirs
 Source: "{#SourceDir}\autoload\*"; DestDir: "{app}\autoload"; Components: app; Flags: ignoreversion recursesubdirs
 Source: "{#SourceDir}\icon.svg"; DestDir: "{app}"; Components: app; Flags: ignoreversion
+; Task 268 — bundled math font (STIX Two Math, SIL OFL) loaded at runtime for
+; guaranteed math-symbol coverage; ship its OFL licence alongside.
+Source: "{#SourceDir}\fonts\*"; DestDir: "{app}\fonts"; Components: app; Flags: ignoreversion recursesubdirs
 
 ; Task 102 — ship the .godot script-class / import cache so the project's
 ; `class_name` types (NotebookView, IconMenuBar, ColorConfig, ...) and the

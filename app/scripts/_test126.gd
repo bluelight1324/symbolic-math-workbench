@@ -91,9 +91,11 @@ static func run() -> void:
 	ckt.call("zen off shows sidebar", (not nv._zen_on) and nv._sidebar_col.visible)
 
 	print("=== 3D surface builder ===")
-	nv._color_scheme = {"src_bg": Color.WHITE, "text": Color.BLACK, "muted": Color.GRAY,
+	nv._color_scheme = {"bg": Color(0.93, 0.94, 0.96), "src_bg": Color.WHITE,
+		"text": Color.BLACK, "muted": Color.GRAY,
 		"res_bg": Color(0.96, 0.96, 0.98), "res_border": Color(0.8, 0.8, 0.85),
-		"res_chip": Color(0.2, 0.4, 0.7)}
+		"res_chip": Color(0.2, 0.4, 0.7), "src_border": Color(0.75, 0.78, 0.82),
+		"src_chip": Color(0.3, 0.5, 0.4)}
 	nv._density = {"chip_size": 24, "chip_offset": 4, "corner_radius": 6, "cell_padding": 8,
 		"border_width": 1}
 	var good = nv._build_surface3d("z = sin(x)*cos(y)")
@@ -330,6 +332,110 @@ static func run() -> void:
 		slot_node.get_child_count() == 1 and slot_node.get_child(0) is Label)
 	ck.call("detached async threads data through", (slot_node.get_child(0) as Label).text, "DATA")
 	apc.free()
+
+	print("=== task 264 — math symbol formatting + font fallback ===")
+	ck.call("sqrt → √", MathFormatter.to_display("sqrt(x)"), "√(x)")
+	ck.call("int → ∫", MathFormatter.to_display("int(f,x)"), "∫(f,x)")
+	ck.call("<= → ≤", MathFormatter.to_display("a<=b"), "a≤b")
+	ck.call(">= → ≥", MathFormatter.to_display("a>=b"), "a≥b")
+	ck.call("!= → ≠", MathFormatter.to_display("a!=b"), "a≠b")
+	ck.call("-> → →", MathFormatter.to_display("a->b"), "a→b")
+	ck.call("infinity → ∞", MathFormatter.to_display("infinity"), "∞")
+	ck.call("pi → π (word only)", MathFormatter.to_display("2*pi"), "2·π")
+	ck.call("neg exponent x^(-2) → x⁻²", MathFormatter.to_display("x^(-2)"), "x⁻²")
+	ck.call("paren exponent x^(12) → x¹²", MathFormatter.to_display("x^(12)"), "x¹²")
+	ck.call("plain power x**2 → x²", MathFormatter.to_display("x**2"), "x²")
+	ck.call("symbolic exponent x^n stays", MathFormatter.to_display("x^n"), "x^n")
+	ck.call("variable with sqrt substring untouched",
+		MathFormatter.to_display("sqrt_x"), "sqrt_x")
+	ckt.call("bundled STIX Two Math file present",
+		FileAccess.file_exists(FontConfig.BUNDLED_MATH_FONT))
+	ckt.call("math_font resolves (non-null)", FontConfig.math_font() != null)
+	ckt.call("font_resource attaches the math fallback",
+		(FontConfig.font_resource("matlab") as SystemFont).fallbacks.size() >= 1)
+
+	print("=== task 265 — BBCode 2-D (matrix grids) ===")
+	ck.call("matrix → table grid", MathFormatter.to_bbcode("mat((1,2),(3,4))"),
+		"[table=2][cell]1[/cell][cell]2[/cell][cell]3[/cell][cell]4[/cell][/table]")
+	ck.call("matrix with expressions (nested commas safe)",
+		MathFormatter.to_bbcode("mat((a,sin(t)),(0,b))"),
+		"[table=2][cell]a[/cell][cell]sin(t)[/cell][cell]0[/cell][cell]b[/cell][/table]")
+	ck.call("3-col matrix", MathFormatter.to_bbcode("mat((1,2,3))"),
+		"[table=3][cell]1[/cell][cell]2[/cell][cell]3[/cell][/table]")
+	ck.call("literal bracket escaped", MathFormatter.to_bbcode("[a,b]"), "[lb]a,b]")
+	ck.call("plain result passes through", MathFormatter.to_bbcode("x² + 2·x + 1"), "x² + 2·x + 1")
+
+	print("=== task 266 — [sup] via custom effect + cross-platform fallback ===")
+	ck.call("paren exponent → [sup]", MathFormatter.to_bbcode("x^(n+1)"), "x[sup]n+1[/sup]")
+	ck.call("bare symbolic exponent → [sup]", MathFormatter.to_bbcode("x^n"), "x[sup]n[/sup]")
+	ck.call("x^n+1 raises only n", MathFormatter.to_bbcode("x^n+1"), "x[sup]n[/sup]+1")
+	ckt.call("RTSuperscript effect tag is 'sup'",
+		preload("res://scripts/rt_superscript.gd").new().bbcode == "sup")
+	ckt.call("RTSubscript effect tag is 'sub'",
+		preload("res://scripts/rt_subscript.gd").new().bbcode == "sub")
+	ckt.call("fallback list covers Win+mac+Linux (>=8 names)",
+		FontConfig.MATH_FALLBACK_NAMES.size() >= 8 \
+		and "Cambria Math" in FontConfig.MATH_FALLBACK_NAMES \
+		and "STIX Two Math" in FontConfig.MATH_FALLBACK_NAMES \
+		and "DejaVu Sans" in FontConfig.MATH_FALLBACK_NAMES)
+
+	# ----------------------------------------------------------------------------
+	# Task 271 — thorough pass over the math-rendering features (264/265/266/268/270).
+	# ----------------------------------------------------------------------------
+	print("=== task 271 — thorough: symbol map (to_display) ===")
+	ck.call("<> → ≠", MathFormatter.to_display("a<>b"), "a≠b")
+	ck.call("/= → ≠", MathFormatter.to_display("a/=b"), "a≠b")
+	ck.call("=> → ⇒", MathFormatter.to_display("p=>q"), "p⇒q")
+	ck.call("partial → ∂", MathFormatter.to_display("partial"), "∂")
+	ck.call("nabla → ∇", MathFormatter.to_display("nabla"), "∇")
+	ck.call("infty → ∞", MathFormatter.to_display("infty"), "∞")
+	ck.call("Greek omega/theta", MathFormatter.to_display("omega*theta"), "ω·θ")
+	ck.call("multi-digit power x**23 → x²³", MathFormatter.to_display("x**23"), "x²³")
+	ck.call("negative paren exponent x^(-3) → x⁻³", MathFormatter.to_display("x^(-3)"), "x⁻³")
+	ck.call("whole-word only: alpha_1 untouched", MathFormatter.to_display("alpha_1"), "alpha_1")
+	ck.call("function sin untouched", MathFormatter.to_display("sin(x)"), "sin(x)")
+	# Task 272 regression — a numeric exponent before ')' must NOT eat the paren.
+	ck.call("sqrt(x^2+y^2) keeps closing paren", MathFormatter.to_display("sqrt(x^2 + y^2)"), "√(x² + y²)")
+	ck.call("nested (a^2) keeps paren", MathFormatter.to_display("(a^2)"), "(a²)")
+	ck.call("f(x^3) keeps paren", MathFormatter.to_display("f(x^3)"), "f(x³)")
+
+	print("=== task 271 — thorough: BBCode 2-D (to_bbcode) ===")
+	ck.call("1×1 matrix", MathFormatter.to_bbcode("mat((5))"), "[table=1][cell]5[/cell][/table]")
+	ck.call("matrix with negatives", MathFormatter.to_bbcode("mat((-1,2),(3,-4))"),
+		"[table=2][cell]-1[/cell][cell]2[/cell][cell]3[/cell][cell]-4[/cell][/table]")
+	ck.call("matrix cell with nested call kept whole",
+		MathFormatter.to_bbcode("mat((cos(t),0),(0,cos(t)))"),
+		"[table=2][cell]cos(t)[/cell][cell]0[/cell][cell]0[/cell][cell]cos(t)[/cell][/table]")
+	ck.call("superscript in plain text", MathFormatter.to_bbcode("2^k"), "2[sup]k[/sup]")
+	ck.call("matrix cell superscript (order: table then sup)",
+		MathFormatter.to_bbcode("mat((x^2,1),(0,1))"),
+		"[table=2][cell]x[sup]2[/sup][/cell][cell]1[/cell][cell]0[/cell][cell]1[/cell][/table]")
+	ck.call("both brackets escaped", MathFormatter.to_bbcode("a[b]c[d]"), "a[lb]b]c[lb]d]")
+	ck.call("plain expression unchanged", MathFormatter.to_bbcode("sin(x) + cos(x)"), "sin(x) + cos(x)")
+
+	print("=== task 271 — thorough: effects + bundled STIX font ===")
+	ckt.call("superscript effect present", preload("res://scripts/rt_superscript.gd").new() is RichTextEffect)
+	ckt.call("subscript effect present", preload("res://scripts/rt_subscript.gd").new() is RichTextEffect)
+	ckt.call("bundled font path is an .otf", FontConfig.BUNDLED_MATH_FONT.ends_with(".otf"))
+	ckt.call("bundled STIX .otf present", FileAccess.file_exists(FontConfig.BUNDLED_MATH_FONT))
+	ckt.call("OFL licence bundled", FileAccess.file_exists("res://fonts/OFL.txt"))
+	ckt.call("every family carries the math fallback (spot-check 4)",
+		(FontConfig.font_resource("sans") as SystemFont).fallbacks.size() >= 1 \
+		and (FontConfig.font_resource("serif") as SystemFont).fallbacks.size() >= 1 \
+		and (FontConfig.font_resource("inter") as SystemFont).fallbacks.size() >= 1 \
+		and (FontConfig.font_resource("mono") as SystemFont).fallbacks.size() >= 1)
+	ckt.call("'default' family still returns null (no override)",
+		FontConfig.font_resource("default") == null)
+
+	print("=== task 256 — modernized dialogs ===")
+	var dlg := AcceptDialog.new()
+	nv._apply_dialog_style(dlg)
+	ckt.call("dialog gets a Theme", dlg.theme is Theme)
+	ckt.call("dialog panel styled in scheme", dlg.theme.has_stylebox("panel", "AcceptDialog"))
+	ckt.call("dialog window frame styled", dlg.theme.has_stylebox("embedded_border", "Window"))
+	ckt.call("dialog buttons styled (pill)", dlg.theme.has_stylebox("hover", "Button"))
+	ckt.call("dialog inputs have focus ring", dlg.theme.has_stylebox("focus", "LineEdit"))
+	dlg.free()
 
 	nv.free()
 	print("\n==================================================")

@@ -110,9 +110,47 @@ static func save_pair(size: int, family: String) -> void:
 	cfg.save(PATH)
 
 
+# Task 264/266/268 (MR-F1/F2) — a math-symbol FALLBACK so glyphs the chosen family
+# lacks (∫ ∑ ∂ ∇ √ ≤ ≥ ≠ → ℝ ℂ ℤ …) always render instead of tofu (□).
+#
+# Task 268 — a real math font is now BUNDLED: STIX Two Math (SIL OFL), shipped in
+# app/fonts/. It's the PRIMARY fallback, so coverage is guaranteed on ANY machine
+# (Linux/mac/Windows without Cambria). Behind it, the system math fonts below remain
+# as a further fallback. (JuliaMono was intended too, but its i:\fonts checkout was a
+# broken/incomplete git clone with no usable .ttf, so only STIX is bundled.)
+const BUNDLED_MATH_FONT := "res://fonts/STIXTwoMath-Regular.otf"
+const MATH_FALLBACK_NAMES := [
+	# Windows
+	"Cambria Math", "Segoe UI Symbol", "Segoe UI Historic",
+	# macOS
+	"STIX Two Math", "STIXGeneral", "Apple Symbols",
+	# Linux / cross-platform (OFL / permissive)
+	"Noto Sans Math", "Noto Sans Symbols 2", "DejaVu Sans", "Symbola",
+	# generic last resort
+	"Segoe UI", "sans-serif"]
+static var _math_fallback: Font
+
+
+## The shared math-symbol fallback: the bundled STIX Two Math (loaded at runtime, so
+## no import-cache regen is needed), backed by the system math fonts. Falls back to
+## the system-only chain if the bundled file is somehow missing. Built once, cached.
+static func math_font() -> Font:
+	if _math_fallback == null:
+		var sysfb := SystemFont.new()
+		sysfb.font_names = PackedStringArray(MATH_FALLBACK_NAMES)
+		var ff := FontFile.new()
+		if ff.load_dynamic_font(BUNDLED_MATH_FONT) == OK and ff.get_font_name() != "":
+			ff.fallbacks = [sysfb]        # bundled STIX → system math fonts
+			_math_fallback = ff
+		else:
+			_math_fallback = sysfb        # bundle missing → system-only
+	return _math_fallback
+
+
 ## Returns a SystemFont resource for the requested family key, or null if
 ## the user picked "default" (in which case caller should not override the
-## theme font and the existing default applies).
+## theme font and the existing default applies). Task 264 — every returned font
+## carries the math fallback so math symbols never render as tofu.
 static func font_resource(family_key: String) -> Font:
 	for f in FAMILIES:
 		if f["key"] != family_key:
@@ -122,6 +160,7 @@ static func font_resource(family_key: String) -> Font:
 			return null
 		var sf := SystemFont.new()
 		sf.font_names = PackedStringArray(names)
+		sf.fallbacks = [math_font()]
 		return sf
 	return null
 
